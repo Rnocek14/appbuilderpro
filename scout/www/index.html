@@ -1,0 +1,1925 @@
+<!-- P14 · the-drift — a concept probe, not a product claim.
+     The question: can you STEER an algorithm with your thumb? The bounded field (P13) grows into
+     a territory — 55×44 cells of staged topic currents, far bigger than a screen. Scrub as
+     before; push into an edge with intent and the world flows under your thumb (you push, it
+     never pushes: attack 180ms, release zero, the thumb always has right of way); what you dwell
+     on tilted what unseen territory materialized ahead (since rev. 4 it changes only the glow — cells
+     are placed, not sampled); the walked world is immutable forever; a
+     trail line is drawn on the land and the journey is an object you can re-walk. Travel has
+     two grips, both operator-tested: the edge conveyor, and the drift ring — a spring-loaded
+     puck in the thumb's home whose displacement is the velocity vector, with selection handed
+     to a reticle near center that the world streams past (the radio-tuner inversion).
+     Rendered as a luminous canvas: topic currents glow as nebulas under the dots, selection is
+     an ignition, every detent throws sparks, the halo trails a comet, conveyor speed streaks the
+     field. Inevitable when: brushing an edge mid-scrub never yanks the world; holding the east
+     edge feels like wading a current and releasing stops it dead; back-scrubbing meets the exact
+     same dots; and the first screenshot makes someone ask what app that is.
+     Rev. 3 (2026-09-02): two kinds of scent. For the eye — the ring of dots nearest the
+     selection blooms into readable labels while the thumb is slow and vanishes the moment it
+     skims (read three neighbours while feeling one). For the thumb — every kind has its own
+     detent: a photo is a crisp click, a reel a rounder thud, a carousel a double tap (full
+     texture through Core Haptics in the wrap; the stock tick can only tell reels apart; on the
+     web the tick's sound carries it). Plus the seed's park lock: a resting thumb never ticks.
+     Rev. 4 (2026-09-02): the map means something. Direction is the same in every consumer world —
+     right is WILD, left CALM, up SERIOUS, down GOOFY — and regions (chess … basketball … BASE) sit at
+     hand-placed coordinates as named nebulas whose positions never move: geography is stable by
+     construction (a placement lookup, not an embedding projection). The referee's rulings: y is an
+     editorial region coordinate, never a per-item tone label; hue names the region (8 families by
+     bearing, never in the ember band); the intensity ramp lives on the nebula layer only; dots are
+     placed, not sampled — steering is logged as an explicit preference and in this demo changes only
+     the nebula glow; the creators world's x is "familiar ↔ new" (breaking), stated on its face. The
+     world tables are EDITION 0 (draft) until argued once; surf and rage-bait were removed. Rev. 4 stays
+     private until the provisional is filed.
+     Rev. 5 (2026-09-02): the wheel. The founder's clarification — "deeper or shallower is intensity,
+     direction is category" — is a polar map, and it dissolved the panel's reason for the plane (tone on
+     the angle). So: the hub is the mainstream, the rim is the deep end, each bearing is a kind. Eight
+     sectors 45° apart carry the kinds and their hues (one hue per sector, exact — the collision rule is
+     gone); regions sit at (sector, radius); the ring shows HOME at the bearing to the hub and DEEPER
+     opposite, and while you push the depth word you head toward lights with the kind ahead at the screen
+     edge. Register (serious / goofy) is a tag on the card, not geometry. A fifth world — movies, on a
+     fixed catalogue with a genre wheel — is where the remote is most literally a remote. The camera is
+     clamped to the wheel: the rim is the wall ("as deep as this world goes"). Still private.
+     Real worlds (2026-09-02): a world edition written by scripts/shorts-drop.ts — real YouTube Shorts
+     placed on the wheel by src/lib/worldPlacement.ts, one frozen JSON with a layout hash — is loaded
+     from worlds/*.json at boot and joins the chip strip. Its cells are placed, not sampled; a dot
+     opens YouTube's own player; the footer names the source, the date and the hash. Without a key the
+     pipeline writes a fixture drop that says it is one and never shows a player.
+     Staged world, simulated steering — no model, and it says so. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Scout</title>
+<style>
+:root{
+  --sab: env(safe-area-inset-bottom, 0px);
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --serif:Charter, Georgia, "Times New Roman", serif;
+  --chrome:-apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono:ui-monospace, "SF Mono", Menlo, monospace;
+  --forge:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overscroll-behavior:none}
+body{background:radial-gradient(120% 90% at 50% 35%, #101522 0%, #0B0E14 55%, #07090E 100%) fixed, var(--ground);
+  color:var(--ink); font:14px var(--chrome); overflow:hidden;
+  -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); outline-offset:2px; border-radius:6px}
+::selection{background:var(--ember-soft)}
+
+/* ---------- fixed chrome ---------- */
+.tabs{position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:50%; transform:translateX(-50%);
+  display:flex; gap:6px; z-index:40}
+.tab{font-size:13px; color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 14px;
+  backdrop-filter:blur(6px)}
+.tab.on{color:var(--ink); background:rgba(19,24,34,.7); border-color:var(--line)}
+.tab:hover{color:var(--ink)}
+.pulse{position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); right:20px;
+  font:12px var(--mono); font-variant-numeric:tabular-nums; color:var(--dim); z-index:40}
+.driftlabel{position:fixed; top:calc(env(safe-area-inset-top,0px) + 50px); left:50%; transform:translateX(-50%);
+  font:12px var(--mono); color:var(--faint); z-index:40; max-width:92vw; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis}
+.driftlabel b{color:var(--dim); font-weight:400}
+.worldchip{position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:14px; z-index:40; font:13px var(--chrome);
+  color:var(--ink); border:1px solid var(--line); border-radius:999px; padding:4px 12px; background:rgba(19,24,34,.7);
+  backdrop-filter:blur(6px)}
+.worldchip:hover{border-color:rgba(232,131,58,.4)}
+.worldstrip{position:fixed; top:calc(env(safe-area-inset-top,0px) + 44px); left:14px; z-index:40; display:none; gap:6px;
+  padding:6px; background:rgba(19,24,34,.85); border:1px solid var(--line); border-radius:12px; backdrop-filter:blur(8px)}
+.worldstrip.on{display:flex}
+.worldstrip button{font:13px var(--chrome); color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 12px}
+.worldstrip button[aria-pressed="true"]{color:var(--ink); border-color:var(--line); background:var(--surface-2)}
+.worldstrip button:hover{color:var(--ink)}
+.hapchip{position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(env(safe-area-inset-bottom,0px) + 162px); z-index:41;
+  font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
+  border-radius:999px; padding:4px 12px; transition:opacity 600ms; white-space:nowrap; max-width:94vw;
+  overflow:hidden; text-overflow:ellipsis}
+.hapchip:empty{display:none}
+.hapchip a{color:var(--ember); text-decoration:none}
+
+/* ---------- the drift viewport ---------- */
+#field{position:fixed; inset:0; touch-action:none; cursor:crosshair; z-index:10; overflow:hidden}
+#field:focus{outline:none}
+#field:focus-visible{outline:none; box-shadow:inset 0 0 0 2px var(--ember-soft)}
+#fieldcv{position:absolute; inset:0; width:100%; height:100%}
+#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 176px); transform:translateX(-50%);   /* above the compass word, never on it */
+  font:italic 14px var(--serif); color:var(--faint); z-index:20; pointer-events:none;
+  transition:opacity 400ms; white-space:nowrap}
+#vig{position:fixed; inset:0; pointer-events:none; z-index:17; opacity:0; transition:opacity 300ms;
+  background:radial-gradient(ellipse at center, transparent 58%, rgba(4,6,10,.34))}
+#vig.on{opacity:1}
+
+/* edge glow — lit only while the conveyor flows that way */
+.egde{position:fixed; z-index:18; pointer-events:none; opacity:0; transition:opacity 160ms}
+.egde.on{opacity:1}
+#egN{top:0; left:0; right:0; height:64px; background:linear-gradient(rgba(232,131,58,.16), transparent)}
+#egS{bottom:0; left:0; right:0; height:64px; background:linear-gradient(transparent, rgba(232,131,58,.16))}
+#egW{top:0; bottom:0; left:0; width:64px; background:linear-gradient(90deg, rgba(232,131,58,.16), transparent)}
+#egE{top:0; bottom:0; right:0; width:64px; background:linear-gradient(-90deg, rgba(232,131,58,.16), transparent)}
+
+/* ---------- preview card ---------- */
+#card{position:fixed; left:0; top:0; width:min(88vw,330px); z-index:25; pointer-events:none;
+  background:rgba(19,24,34,.88); backdrop-filter:blur(10px); border:1px solid var(--line); border-radius:14px;
+  overflow:hidden; box-shadow:0 12px 44px rgba(0,0,0,.55), 0 0 0 1px rgba(232,131,58,.05);
+  transition:opacity 120ms linear}
+#card.docked{left:50%; transform:translateX(-50%)}
+#card.docked .media{display:none}
+#card.hidden{opacity:0}
+#card .media{display:block; width:100%; height:150px; background:var(--surface-2)}
+#cpreview{position:absolute; left:0; top:0; width:100%; height:150px; display:none; border:0; background:#000; pointer-events:none; overflow:hidden}
+#card.docked #cpreview{display:none}
+#card .body{padding:10px 12px 11px}
+#card .who{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--dim)}
+#card .who .tdot{width:8px; height:8px; border-radius:50%; flex:none; box-shadow:0 0 8px currentColor}
+#card .who b{color:var(--ink); font-weight:500}
+#card .who .age{margin-left:auto; font:11px var(--mono); color:var(--faint)}
+#card .cap{margin-top:6px; font:15px/1.45 var(--serif); color:var(--ink);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-wrap:balance}
+#card.deep .cap{-webkit-line-clamp:4}
+#card .meta{margin-top:7px; display:flex; gap:10px; font:11px var(--mono); color:var(--faint)}
+#card .meta .kind{color:var(--dim)}
+
+/* ---------- post view ---------- */
+#post{position:fixed; inset:0; background:var(--ground); z-index:50; display:none; flex-direction:column}
+#post iframe{display:block; border:0; background:#000; height:min(62vh, 177vw); aspect-ratio:9/16; margin:0 auto; max-width:100%}
+#post.on{display:flex}
+#post .top{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px}
+#post .top .tdot{width:9px; height:9px; border-radius:50%; box-shadow:0 0 8px currentColor}
+#post .top b{font-weight:500}
+#post .top .age{font:11px var(--mono); color:var(--faint)}
+#post .top button{margin-left:auto; width:32px; height:32px; border:1px solid var(--line); border-radius:8px; color:var(--dim)}
+#post .top button:hover{color:var(--ink)}
+#post canvas{display:block; width:100%; flex:none}
+#post .cap{padding:16px 18px; font:17px/1.55 var(--serif); max-width:62ch}
+#post .meta{padding:0 18px 18px; font:12px var(--mono); color:var(--faint); display:flex; gap:14px}
+
+/* ---------- the trail ---------- */
+#trail{position:fixed; inset:0; z-index:15; display:none; overflow-y:auto;
+  padding:calc(env(safe-area-inset-top,0px) + 52px) 14px calc(env(safe-area-inset-bottom,0px) + 52px)}
+#trail.on{display:block}
+#trail .lead{max-width:560px; margin:0 auto 10px; font:italic 14px/1.5 var(--serif); color:var(--dim)}
+#trail .row{display:flex; align-items:center; gap:10px; width:100%; max-width:560px; margin:0 auto;
+  text-align:left; padding:10px 10px; border-bottom:1px solid var(--line); border-radius:0}
+#trail .row .tdot{width:9px; height:9px; border-radius:50%; flex:none; box-shadow:0 0 8px currentColor}
+#trail .row .txt{min-width:0}
+#trail .row .txt .l1{font-size:13px; color:var(--dim)} #trail .row .txt .l1 b{color:var(--ink); font-weight:500}
+#trail .row .txt .l2{font:14px/1.4 var(--serif); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+#trail .row .mark{margin-left:auto; font:11px var(--mono); color:var(--faint); flex:none}
+#trail .row.opened .mark{color:var(--warn)}
+#trail .row:hover{background:var(--surface)}
+#trail .empty{max-width:560px; margin:24px auto; font:italic 15px var(--serif); color:var(--faint); text-align:center}
+
+/* ---------- instruments ---------- */
+#homebtn{position:fixed; right:16px; bottom:calc(env(safe-area-inset-bottom,0px) + 40px); z-index:45;
+  font:11px var(--mono); color:var(--faint); border:1px solid var(--line); border-radius:6px; padding:3px 8px;
+  background:rgba(19,24,34,.6); backdrop-filter:blur(6px)}
+#homebtn:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+
+/* ---------- HUD ---------- */
+.hud{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); display:flex; align-items:center; gap:10px;
+  font:11px var(--chrome); color:var(--faint); z-index:45}
+.hud button{border:1px solid var(--line); border-radius:6px; width:22px; height:22px; color:var(--faint)}
+.hud button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+.hud button[aria-pressed="false"]{opacity:.45; text-decoration:line-through}
+.card{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 44px); width:min(88vw,340px); z-index:46;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+  display:none}
+.card.on{display:block}
+.card h4{font:500 13px var(--chrome); margin-bottom:8px}
+.card ul{margin-left:16px; display:grid; gap:6px; font-size:12.5px; color:var(--dim); line-height:1.45}
+.card .note{margin-top:10px; font-size:11px; color:var(--faint); line-height:1.4}
+.card .haprow{margin-top:10px; display:flex; align-items:center; gap:8px; font:11px var(--mono); color:var(--faint)}
+.card .haprow button{border:1px solid var(--line); border-radius:6px; padding:2px 8px; color:var(--dim)}
+.card .haprow button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+
+.keys{position:fixed; right:20px; bottom:calc(env(safe-area-inset-bottom,0px) + 68px); font:11px var(--chrome);
+  color:var(--faint); z-index:45; text-align:right}
+@media (hover:none){.keys{display:none}}
+
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+
+<div class="tabs" role="tablist" aria-label="View">
+  <button class="tab on" id="tabDrift" role="tab" aria-selected="true">Drift</button>
+  <button class="tab" id="tabTrail" role="tab" aria-selected="false">Trail</button>
+</div>
+<div class="driftlabel" id="driftlabel"></div>
+<button class="worldchip" id="worldchip" aria-haspopup="true" aria-expanded="false" aria-label="Switch world"></button>
+<div class="worldstrip" id="worldstrip" role="group" aria-label="Worlds"></div>
+<div class="pulse" id="pulse"></div>
+<div class="hapchip" id="hapchip"></div>
+
+<div id="field" tabindex="0" role="application" aria-label="The drift — arrow keys move, Enter opens, H for home">
+  <canvas id="fieldcv"></canvas>
+</div>
+<div id="vig"></div>
+<div class="egde" id="egN"></div><div class="egde" id="egS"></div>
+<div class="egde" id="egW"></div><div class="egde" id="egE"></div>
+<div id="hint"></div>
+
+<div id="card" class="docked" aria-hidden="true">
+  <canvas class="media" id="cmedia" width="330" height="150"></canvas>
+  <div id="cpreview" aria-hidden="true"></div>
+  <div class="body">
+    <div class="who"><span class="tdot" id="ctdot"></span><b id="cauthor"></b><span id="chandle"></span><span class="age" id="cage"></span></div>
+    <div class="cap" id="ccap"></div>
+    <div class="meta"><span class="kind" id="ckind"></span><span id="ccur"></span></div>
+  </div>
+</div>
+
+<div id="post" role="dialog" aria-modal="true" aria-label="Post">
+  <div class="top"><span class="tdot" id="ptdot"></span><b id="pauthor"></b><span class="age" id="page"></span>
+    <button id="pclose" aria-label="Close post">✕</button></div>
+  <canvas id="pmedia" width="800" height="620"></canvas>
+  <iframe id="pframe" title="YouTube player" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" style="display:none"></iframe>
+  <div class="cap" id="pcap"></div>
+  <div class="meta" id="pmeta"></div>
+</div>
+
+<div id="trail" aria-label="Your trail"></div>
+
+<button id="homebtn" aria-label="Glide back to where you started"></button>
+
+<div class="keys">arrows move · Shift+arrows steer · Enter opens<br>H home · W next world · Esc closes</div>
+<div class="hud">
+  <span id="hudlabel">scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="snd" aria-label="Tick sound" aria-pressed="true">♪</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Scrub as before. To travel, rest your thumb in the <em>ring</em> at the bottom and push — any direction, any amount. The world flows, ticking past the needle near center. Release: it stops dead. You push, it never pushes.</li>
+    <li>The edges still work too: push into one <em>with intent</em> and hold. Brush one casually mid-scrub and the world must not move.</li>
+    <li>Dwell on what you like — the nebula of that kind glows brighter ahead. Nothing else changes: cells are placed, not sampled, and the label top-centre names the place you are in.</li>
+    <li>The glowing weather under the dots is real information: each nebula is a topic current. Read the land before you touch it.</li>
+    <li>Back-scrub your own path: the exact same dots, same positions, your fades intact. The walked world never rewrites.</li>
+    <li>Your route is drawn on the land. The Trail tab is the journey as an object — tap any stop to glide back to it.</li>
+    <li><em>Slow down</em> and the dots around your selection bloom into labels — read three neighbours while feeling one. Skim and they vanish; they must never clutter speed.</li>
+    <li>Kinds feel different: a photo is a crisp click, a reel a rounder thud, a carousel a double tap. Full texture needs the Core Haptics plugin in the wrap; the stock tick only tells reels apart; on the web the sound carries it.</li>
+    <li><em>The map is a wheel.</em> The middle is the mainstream; push out and it gets deeper — more extreme, more obscure, whatever this world's deep end is; each direction is a kind. HOME on the ring always points at the middle; DEEPER sits opposite. Push and the word you are heading for lights, with the kind ahead at the screen edge: you are telling the algorithm "deeper into horror", out loud.</li>
+    <li>Switch worlds (top-left chip, or W). New kinds, same wheel — your bearing and depth carry over. Read the kind names on the land before you touch it; the card names a place's register (serious, goofy) as a word, never as a colour.</li>
+  </ul>
+  <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
+  <div class="note">Honest label: positions come from scores, not from learning — they cannot move
+  today. Steering moves you; it is also logged as a preference, and in this demo the only thing that
+  preference changes is the glow of the land ahead. Tomorrow's world is new. The staged content is a
+  seeded simulation; the steering loop, the compass and the feel are real. A world loaded from
+  <code>worlds/*.json</code> is an edition the pipeline wrote; the footer says which kind — <em>YouTube</em>
+  (real shorts, YouTube's own player on open) or <em>fixture</em> (synthetic items, no player). Either way
+  you control this app's algorithm, not YouTube's.</div>
+</div>
+
+<div class="sr" aria-live="polite" id="live"></div>
+
+<script>
+'use strict';
+/* ===================== staged world — one source of truth ====================================
+   A bounded territory: WCOLS×WROWS cells at 44px pitch with a wheel inscribed (rev. 5). Every cell
+   derives everything from a seeded hash of its coordinates plus the steering weights at the
+   moment it is FIRST seen — after that it is cached forever. The walked world never rewrites;
+   only unseen territory responds to the thumb. That is the honesty contract of the demo.     */
+const SEED = 5417, PITCH = 44, JITTER = 4, WCOLS = 47, WROWS = 47;
+const HUB_C = WCOLS/2, HUB_R = WROWS/2, RIM = (Math.min(WCOLS, WROWS) - 3)/2;   // the wheel: hub cell and rim radius, in cells
+const WORLD_W = WCOLS*PITCH, WORLD_H = WROWS*PITCH, TOTAL_CELLS = WCOLS*WROWS;
+
+/* ===================== the wheel — direction is a kind, depth is intensity, the hub is the mainstream ==
+   Polar, by the founder's own sentence: "deeper or shallower is intensity, direction is category."
+   Eight sectors 45° apart (0 = east, counter-clockwise) carry a world's KINDS and their hues — one hue
+   per sector, the same sector index wearing the same hue in every world. Regions are named places at
+   (sector, radius ∈ [0,1]); their positions never move, so the geography is stable BY CONSTRUCTION.
+   Radius is the world's own depth pair (casual → extreme, mainstream → deep cut …); the ring's words are
+   universal: HOME toward the hub, DEEPER away from it. Register (serious / goofy) is a tag on the card —
+   never geometry, never printed on a dot. All coordinates are EDITION 0 (draft) — argued by nobody yet. */
+const WHEEL = { home: 'home', lit: ['shallower', 'deeper'] };            // at the hub the ring shows the world's own shallow word
+const WORLDS = {
+  sports: { name: 'sports', edition: 0, depth: ['casual', 'extreme'],
+    sectors: ['ball', 'court', 'combat', 'motor', 'air & mountain', 'wheels', 'mind & pub', 'club & field'], regions: [
+    { key:'soccer',          sector:0, radius:0.30, authors:['Sunday League FC','Tomas Reko'],  caps:['Ninety minutes, one goal, all of it.','A pass that opened the whole pitch like a door.','The keeper read it. Nobody else did.'] },
+    { key:'football',        sector:0, radius:0.60, tag:'serious', authors:['Friday Lights','Coach Bram'], caps:['Fourth and one. Everybody knew. It worked anyway.','Film study: the pull block nobody watched.','Homecoming, mud, a two-point conversion.'] },
+    { key:'basketball',      sector:1, radius:0.30, authors:['Blacktop Notes','Jay Okon'],      caps:['Left-hand finish under two defenders.','Pickup at dusk. Winners stay. Legends mostly leave.','The crossover that ended a friendship.'] },
+    { key:'mma & boxing',    sector:2, radius:0.80, tag:'serious', authors:['Cage Corner','Rafa Osei'], caps:['Round three, both gassed, nobody quit.','A guillotine from nowhere.','Twelve rounds of jab, and then the jab was enough.'] },
+    { key:'moto',            sector:3, radius:0.70, authors:['Two Stroke Sunday','Vee Lindgren'], caps:['Whip over the triple. Landing negotiable.','Rebuilt the top end in the parking lot.','Mud so deep the bike just stayed.'] },
+    { key:'base & freeride', sector:4, radius:0.95, tag:'serious', authors:['Exit Point','Kaia Storm'], caps:['Three seconds of quiet, then the canopy.','Big-mountain line, first descent, all fall line.','Wingsuit through the notch. Do not.'] },
+    { key:'trick shots',     sector:5, radius:0.30, tag:'goofy', authors:['Blooper Reel','Nell Park'], caps:['Bottle flip off the roof, first try, witnesses.','The mascot fell. The mascot got up. Legend.','Trick shot, forty takes, one miracle.'] },
+    { key:'skate & bmx',     sector:5, radius:0.65, authors:['Ledge Life','Mo Castillo'],       caps:['Kickflip down the six after forty tries.','The security guard became the cameraman.','A slam so clean it got a round of applause.'] },
+    { key:'pub games',       sector:6, radius:0.25, tag:'goofy', authors:['Lane 9 Lounge','Kip Dorsey'], caps:['The 7-10 split. We do not talk about it.','Darts final, last leg, the whole pub silent.','Pool hustle, two quarters, one life lesson.'] },
+    { key:'chess',           sector:6, radius:0.65, tag:'serious', authors:['Board & Clock','Ilse Marr'], caps:['Queen sac on move 19. The engine hated it. The room did not.','Blitz at the park tables until the light went.','Endgame study: two knights, one lesson.'] },
+    { key:'golf',            sector:7, radius:0.20, authors:['Dawn Patrol Links','Rey Alonso'], caps:['Seven a.m., first tee, nobody else awake.','Read the break wrong three times. Fourth one dropped.','The par-three over water, finally, dry.'] },
+    { key:'bat & ball',      sector:7, radius:0.50, authors:['Dugout Radio','Nia Feld'],        caps:['Extra innings and the lights hum.','A pickoff so slow it counted as art.','Day five of the test match and the tea was decisive.'] },
+  ] },
+  music: { name: 'music', edition: 0, depth: ['mellow', 'intense'],
+    sectors: ['pop', 'hip-hop', 'electronic', 'rock', 'roots', 'jazz', 'stage', 'novelty'], regions: [
+    { key:'pop',        sector:0, radius:0.20, authors:['Hook City','Sam Aldana'],          caps:['The chorus arrives eight seconds early and it rules.','Bridge, key change, confetti.','A demo that should stay a demo. It did not.'] },
+    { key:'hip-hop',    sector:1, radius:0.40, authors:['Cypher Corner','Marcus Vell'],     caps:['Bars over a loop of a broken fan.','The beat switch at 2:10.','Freestyle, first take, no punch-ins.'] },
+    { key:'electronic', sector:2, radius:0.55, authors:['Modular Sundays','Ines Roth'],     caps:['Patch cables, one knob, forty minutes.','The drop that made the floor into one animal.','Field recording of a fridge, now a kick drum.'] },
+    { key:'punk',       sector:3, radius:0.60, tag:'goofy', authors:['Basement Show','Riot Kettle'], caps:['Ninety seconds, three chords, one broken string.','The pit opened and the ceiling tile fell.','Merch table was a suitcase.'] },
+    { key:'metal',      sector:3, radius:0.92, tag:'serious', authors:['Down Tuned','Sigrid Voss'], caps:['Blast beats at a tempo that has a name.','The breakdown. You know the one.','Seven strings, no apologies.'] },
+    { key:'folk',       sector:4, radius:0.25, authors:['Porch Sessions','Hank Ory'],       caps:['Three chords and the porch light.','The song her grandmother hummed, finally written down.','A murder ballad, sweetly.'] },
+    { key:'classical',  sector:4, radius:0.60, tag:'serious', authors:['Fourth Movement','Léa Baum'], caps:['The oboe held the room for eleven seconds.','Rehearsal note: less, then even less.','A Bach partita on a Tuesday, for nobody.'] },
+    { key:'jazz',       sector:5, radius:0.45, authors:['Late Set','Dee Okafor'],           caps:['The bassist quoted the head backwards. Grins.','Second set, half the room, all the music.','Trading fours until the bartender begged.'] },
+    { key:'musicals',   sector:6, radius:0.35, tag:'goofy', authors:['Stage Door','Priya Nair'], caps:['The eleven o’clock number landed at nine forty.','Tap break. The floor forgave us.','Understudy night. Understudy triumph.'] },
+    { key:'novelty',    sector:7, radius:0.30, tag:'goofy', authors:['Kazoo Orchestra','Bo Tinsley'], caps:['A love song to a parking meter.','Twelve kazoos, one anthem.','The rap about our cat, remastered.'] },
+  ] },
+  kitchen: { name: 'kitchen', edition: 0, depth: ['comfort', 'extreme'],
+    sectors: ['baking', 'prep', 'ferment', 'lab', 'heat', 'street', 'contest', 'fails'], regions: [
+    { key:'tea & bread',    sector:0, radius:0.20, authors:['Slow Crumb','Ama Kessie'],      caps:['The crumb finally opened. Four years.','Steeping, timed, quiet.','A loaf that took two days and a nap.'] },
+    { key:'home baking',    sector:0, radius:0.50, authors:['Flour Dusted','Otis Vane'],      caps:['Croissants, attempt nine. Layers!','A birthday cake that leaned but delivered.','Cookies for the neighbours, and then not.'] },
+    { key:'meal prep',      sector:1, radius:0.30, tag:'serious', authors:['Sunday Boxes','Renna Cole'], caps:['Twelve boxes, one pan, done by noon.','The rice ratio that finally behaved.','Roasted everything. Regret nothing.'] },
+    { key:'fermentation',   sector:2, radius:0.60, tag:'serious', authors:['Brine Lab','Teo Marsh'], caps:['Day 14: the kraut has opinions.','Koji on rice, the whole room smells like spring.','A hot sauce that took six months to be polite.'] },
+    { key:'molecular',      sector:3, radius:0.85, tag:'serious', authors:['Bench Kitchen','Dr. Lise Aro'], caps:['Spherified olive. Tasted like an olive. Success?','A foam that survived the walk to the table.','Liquid nitrogen and one very brave sorbet.'] },
+    { key:'grilling',       sector:4, radius:0.45, authors:['Smoke Ring','Big Del'],           caps:['Fourteen hours. The bark is a religion.','Reverse sear, forward flavour.','The grill lid as weather report.'] },
+    { key:'hot chili',      sector:4, radius:0.85, authors:['Scoville Club','Paz Ruiz'],       caps:['Reaper salsa. The spoon regretted it.','Growing them was the easy part.','Milk on standby, pride on the line.'] },
+    { key:'street food',    sector:5, radius:0.30, authors:['Cart Life','Mei Lun'],           caps:['Two dollars, one skewer, the whole night.','The line was the point.','Tacos at a truck that only opens when it rains.'] },
+    { key:'eating contest', sector:6, radius:0.90, tag:'goofy', authors:['Plate Speed','Gus Halloway'], caps:['Forty-two dumplings, a personal best, a personal reckoning.','The hot-dog method, explained once.','Pie contest. Hands-free. No mercy.'] },
+    { key:'kitchen fails',  sector:7, radius:0.50, tag:'goofy', authors:['Burnt Offerings','Nan Petty'], caps:['The soufflé, in the moment before.','Salt for sugar. Full batch.','A pancake that reached the ceiling.'] },
+  ] },
+  creators: { name: 'creators', edition: 0, depth: ['familiar', 'new'],
+    hint: 'Same wheel — here deeper means newer: the rim is breaking now.',
+    sectors: ['long-form', 'how-to', 'story', 'craft', 'growth', 'reaction', 'trends', 'takes'], regions: [
+    { key:'essays',          sector:0, radius:0.25, tag:'serious', authors:['Long Form','Ada Quill'], caps:['A twenty-minute video about a four-second clip.','The essay that made a niche a nation.','Chapter markers as an act of respect.'] },
+    { key:'tutorials',       sector:1, radius:0.30, authors:['Show Don’t Tell','Marco Beni'],   caps:['The keyframe trick, at last, in one shot.','Colour grade in ninety seconds, no plugins.','A microphone comparison that ended arguments.'] },
+    { key:'storytime',       sector:2, radius:0.30, authors:['Pull Up A Chair','Jules Fenn'],   caps:['So the landlord shows up in a kayak.','Part three, and yes there is a part four.','The wedding, the dog, the fireworks.'] },
+    { key:'daily vlogs',     sector:2, radius:0.60, authors:['Slow Mornings','Noor Adib'],      caps:['Coffee, inbox, the good light at four.','Filmed the commute. Cut the commute.','A Tuesday, honestly.'] },
+    { key:'hooks & cuts',    sector:3, radius:0.50, authors:['First Three Seconds','Val Ostrow'], caps:['Cold open on the reveal. Retention up.','Jump cut every 1.8 seconds. Yes really.','The hook that was a question with no answer.'] },
+    { key:'breakouts',       sector:4, radius:0.75, authors:['Growth Chart','Ines Farah'],      caps:['From 400 followers to 40k in a week. Here is the post.','The account that did one thing eleven times.','A niche found its narrator this week.'] },
+    { key:'reaction',        sector:5, radius:0.55, authors:['Watching You Watch','Dom Reyes'],  caps:['Paused it forty times. Shocked forty times.','The face at 0:07 is the whole video.','Reacting to a reaction. It is turtles.'] },
+    { key:'memes',           sector:6, radius:0.55, tag:'goofy', authors:['Template Farm','Pixel Ruth'], caps:['The format died Tuesday. Long live the format.','A caption that did more than the clip.','Low effort, high yield, no notes.'] },
+    { key:'trends & sounds', sector:6, radius:0.88, authors:['Sound On','Kit Mora'],            caps:['The audio has 40k uses and a shelf life of days.','Transition trend, third wave, still rising.','A dance you can do sitting down.'] },
+    { key:'hot takes',       sector:7, radius:0.90, authors:['Comment Section','Blaze Ortiz'],   caps:['A take nobody asked for, delivered loudly.','Duet this if you disagree. Everyone did.','Hot take, cold room, warm comments.'] },
+  ] },
+  /* movies: a fixed catalogue, so the map is literally a map — positions frozen for real. Staged from a
+     hand-written list of real titles (facts), no catalogue API, no posters. The remote is a remote here. */
+  movies: { name: 'movies', edition: 0, depth: ['mainstream', 'deep cut'],
+    hint: 'Same wheel, new kinds — the middle is what everyone watches; the rim is the deep end.',
+    sectors: ['comedy', 'romance', 'drama', 'thriller', 'horror', 'action', 'sci-fi', 'animation'], regions: [
+    { key:'crowd comedy',    sector:0, radius:0.30, tag:'goofy', authors:['Judd Apatow','Universal'], caps:['Superbad (2007)','Bridesmaids (2011)','The Hangover (2009)'] },
+    { key:'cult comedy',     sector:0, radius:0.80, tag:'goofy', authors:['Coen brothers','Edgar Wright'], caps:['The Big Lebowski (1998)','Hot Fuzz (2007)','Withnail & I (1987)'] },
+    { key:'rom-coms',        sector:1, radius:0.30, authors:['Nora Ephron','Working Title'],   caps:['When Harry Met Sally (1989)','Notting Hill (1999)','Crazy Rich Asians (2018)'] },
+    { key:'slow romance',    sector:1, radius:0.75, authors:['Wong Kar-wai','Céline Sciamma'], caps:['In the Mood for Love (2000)','Portrait of a Lady on Fire (2019)','Before Sunrise (1995)'] },
+    { key:'prestige drama',  sector:2, radius:0.35, tag:'serious', authors:['Focus Features','Searchlight'], caps:['Moonlight (2016)','Nomadland (2020)','The Social Network (2010)'] },
+    { key:'arthouse',        sector:2, radius:0.85, tag:'serious', authors:['A24','Criterion'], caps:['Aftersun (2022)','Jeanne Dielman (1975)','Stalker (1979)'] },
+    { key:'big thrillers',   sector:3, radius:0.30, authors:['David Fincher','Warner Bros.'],  caps:['Gone Girl (2014)','The Bourne Identity (2002)','Heat (1995)'] },
+    { key:'slow-burn noir',  sector:3, radius:0.80, authors:['Park Chan-wook','Denis Villeneuve'], caps:['Oldboy (2003)','Prisoners (2013)','Memories of Murder (2003)'] },
+    { key:'popcorn horror',  sector:4, radius:0.35, authors:['Blumhouse','James Wan'],          caps:['The Conjuring (2013)','Get Out (2017)','A Quiet Place (2018)'] },
+    { key:'extreme horror',  sector:4, radius:0.90, authors:['Ari Aster','Julia Ducournau'],    caps:['Hereditary (2018)','Raw (2016)','Martyrs (2008)'] },
+    { key:'tentpoles',       sector:5, radius:0.30, authors:['Marvel Studios','Tom Cruise'],    caps:['Top Gun: Maverick (2022)','Mad Max: Fury Road (2015)','Mission: Impossible – Fallout (2018)'] },
+    { key:'martial arts',    sector:5, radius:0.70, authors:['Gareth Evans','Shaw Brothers'],   caps:['The Raid (2011)','Police Story (1985)','Ip Man (2008)'] },
+    { key:'space opera',     sector:6, radius:0.30, authors:['Lucasfilm','Legendary'],          caps:['Dune: Part Two (2024)','Star Wars (1977)','Guardians of the Galaxy (2014)'] },
+    { key:'hard sci-fi',     sector:6, radius:0.80, tag:'serious', authors:['Andrei Tarkovsky','Shane Carruth'], caps:['Solaris (1972)','Primer (2004)','Arrival (2016)'] },
+    { key:'family animated', sector:7, radius:0.25, authors:['Pixar','DreamWorks'],             caps:['Inside Out (2015)','How to Train Your Dragon (2010)','Spider-Man: Into the Spider-Verse (2018)'] },
+    { key:'anime & indie',   sector:7, radius:0.70, authors:['Studio Ghibli','Cartoon Saloon'],  caps:['Spirited Away (2001)','Wolfwalkers (2020)','Perfect Blue (1997)'] },
+  ] },
+};
+const WORLD_KEYS = Object.keys(WORLDS);
+/* a REAL world: an edition JSON from scripts/shorts-drop.ts — regions on the wheel, items already placed
+   into cells by src/lib/worldPlacement.ts. Nothing here is sampled: a cell is an item or it is empty. */
+function installWorld(J){
+  if (!J || !Array.isArray(J.regions) || !Array.isArray(J.cells) || !Array.isArray(J.items) || !J.name ||
+      !Array.isArray(J.depth) || J.depth.length !== 2 || !Array.isArray(J.sectors)) return false;
+  if (WORLDS[J.name] && !WORLDS[J.name].placed){ console.warn('world file ignored: "' + J.name + '" is a staged world here'); return false; }
+  const byId = new Map(J.items.map(it => [it.id, it])), placed = new Map();
+  for (const p of J.cells){ const it = byId.get(p.id); if (it) placed.set(p.c + ',' + p.r, it); }
+  const regions = J.regions.map(R => ({ ...R, authors: [], caps: [] }));
+  WORLDS[J.name] = { name: J.name, edition: J.edition, depth: J.depth, sectors: J.sectors, regions, placed,
+    regionIndex: new Map(regions.map((R, i) => [R.key, i])), items: placed.size, source: J.source, date: J.date,   // the odometer counts what was actually placed
+    hash: J.layoutHash || '', rubric: J.rubric || '',
+    hint: J.source === 'youtube' ? 'Real shorts from YouTube, placed by rubric ' + (J.rubric || '') + ' — open a dot to play.'
+                                 : 'A fixture drop — real shorts land here once the pipeline runs with a key.' };
+  if (!WORLD_KEYS.includes(J.name)) WORLD_KEYS.push(J.name);
+  if (typeof renderWorldChrome === 'function') renderWorldChrome();
+  if (worldKey === J.name && typeof switchWorld === 'function') switchWorld(J.name);   // a live edition replaced: rebuild the land
+  return true;
+}
+let worldKey = 'sports', CURRENTS = WORLDS.sports.regions, WORLD_SEED = SEED;
+/* Hue names the KIND and nothing else: sector i wears family hue i, in every world — the same bearing is
+   the same colour everywhere, exactly. Eight families 39° apart from hsl 52; the band around ember
+   (hsl 5–51) is never used — ember is the one interaction accent. ≤8 hues per world by construction. */
+const HUE_FAMILIES = 8, HUE_START = 52, HUE_SPAN = 312;   // 52 → 364(=4): the ember band 5–51 stays empty
+const SECTOR_DEG = 360 / HUE_FAMILIES;                     // sector i sits at bearing i·45°, 0 = east, counter-clockwise
+function sectorHue(i){ return (HUE_START + i * (HUE_SPAN / HUE_FAMILIES)) % 360; }
+function placeRegions(){                                   // (sector, radius) → cell centre; chroma follows depth (nebula only)
+  CURRENTS.forEach((R, i) => {
+    R.bearing = R.sector * SECTOR_DEG;
+    const a = R.bearing * Math.PI / 180;
+    R.cc = HUB_C + R.radius * RIM * Math.cos(a); R.cr = HUB_R - R.radius * RIM * Math.sin(a);   // screen y grows downward
+    R.spread = 3.6 + 2.6 * R.radius;                       // cells; inner places are tighter, the deep end sprawls (ESTIMATE)
+    R.sat = Math.round(18 + 26 * R.radius);                // deeper glows hotter — on the nebula only, never on a dot
+    R.family = R.sector; R.hue = sectorHue(R.sector);
+    R.density = R.radius >= 0.75 ? 0.65 : 0.85;            // supply: the deep end is honestly sparser (ESTIMATE)
+    R.idx = i;
+  });
+}
+placeRegions();
+const SERENDIPITY = 0.15;   // border blur only — never a topic teleport (referee ruling)
+const KINDS = ['photo','photo','photo','photo','photo','photo','reel','reel','reel','carousel','carousel'];
+
+function hash2(c, r){ let h = (c*73856093) ^ (r*19349663) ^ WORLD_SEED; h = (h ^ (h>>>13)) >>> 0; return h; }
+function rng(seed){ let s = seed>>>0; return () => (s = (s*1664525 + 1013904223)>>>0, s/4294967296); }
+
+/* a cell's current comes from the regions around it — Gaussian weight by distance to each region's
+   fixed centre, with a small floor so no cell is ever voiceless. Nothing here depends on the user. */
+function currentWeights(c, r){
+  const w = new Array(CURRENTS.length).fill(0);
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i], dx = c + 0.5 - R.cc, dy = r + 0.5 - R.cr;
+    w[i] = Math.exp(-(dx*dx + dy*dy) / (2*R.spread*R.spread)) + 0.015;
+  }
+  return w;
+}
+/* where the viewport centre sits on the wheel: [bearing°, radius] — bearing 0 = east, counter-clockwise;
+   radius 0 is the hub (the mainstream), 1 is the rim (as deep as this world goes) */
+function polarPos(){
+  const cx = (camX + innerWidth/2)/PITCH - HUB_C, cy = (camY + innerHeight/2)/PITCH - HUB_R;
+  return [ (Math.atan2(-cy, cx) * 180/Math.PI + 360) % 360, Math.min(1, Math.hypot(cx, cy) / RIM) ];
+}
+const HUB = 0.15;                                          // inside this radius the kind is undefined: you are in the mainstream
+function sectorAt(bearing){ return Math.round(bearing / SECTOR_DEG) % HUE_FAMILIES; }
+function depthWord(radius){                                // the label speaks place in the world's own words
+  const d = WORLDS[worldKey].depth; return radius < 0.3 ? d[0] : radius > 0.7 ? d[1] : '';
+}
+/* what a push means from here — a depth word (deeper / shallower), the kind ahead, or both. Measured one
+   half-screen ahead of the viewport centre along the push, so the words describe where you are going. */
+function aheadPolar(dirX, dirY){                           // [bearing°, radius] half a screen ahead along a push
+  const m = Math.hypot(dirX, dirY) || 1;
+  const ax = (camX + innerWidth/2 + dirX/m * innerHeight*0.5)/PITCH - HUB_C, ay = (camY + innerHeight/2 + dirY/m * innerHeight*0.5)/PITCH - HUB_R;
+  return [ (Math.atan2(-ay, ax) * 180/Math.PI + 360) % 360, Math.hypot(ax, ay) / RIM ];
+}
+function headingWords(dirX, dirY){
+  const [b, r] = polarPos(), [bA, rA] = aheadPolar(dirX, dirY);
+  const depth = rA > r + 0.06 ? WHEEL.lit[1] : rA < r - 0.06 ? WHEEL.lit[0] : '';
+  // the kind ahead is named until you are clearly inside a place (r ≥ 0.3), whenever you head into another sector, and whenever depth alone says nothing
+  const kind = (r < 0.3 || sectorAt(bA) !== sectorAt(b) || !depth) && rA >= HUB ? WORLDS[worldKey].sectors[sectorAt(bA)] : '';
+  return [depth, kind].filter(Boolean);
+}
+function cellDepth(c, r){ return Math.hypot(c + 0.5 - HUB_C, r + 0.5 - HUB_R) / RIM; }
+let DISC_CELLS = 0; for (let r = 0; r < WROWS; r++) for (let c = 0; c < WCOLS; c++) if (cellDepth(c, r) <= 1) DISC_CELLS++;
+let labelRegion = -1;
+function dominantRegion(){                                 // the place under the viewport centre, with hysteresis at borders
+  const w = currentWeights(Math.round((camX + innerWidth/2)/PITCH - 0.5), Math.round((camY + innerHeight/2)/PITCH - 0.5));
+  let best = 0, total = 0; for (let i = 0; i < w.length; i++){ total += w[i]; if (w[i] > w[best]) best = i; }
+  const share = w[best] / total, keep = labelRegion >= 0 ? w[labelRegion] / total : 0;
+  if (labelRegion < 0 || share > keep + 0.1) labelRegion = best;
+  return (w[labelRegion] / total) > 0.34 ? labelRegion : -1;
+}
+
+let affinity = new Array(CURRENTS.length).fill(0);
+function affinityBoost(i, amt){ affinity[i] = Math.max(0, Math.min(8, affinity[i] + amt)); }
+setInterval(() => { for (let i = 0; i < affinity.length; i++) affinity[i] *= 0.9622; }, 5000);
+function topCurrents(n){
+  return affinity.map((a, i) => [a, i]).filter(x => x[0] > 0.4).sort((a, b) => b[0]-a[0]).slice(0, n)
+    .map(x => CURRENTS[x[1]].key);
+}
+
+const cells = new Map();
+function cellKey(c, r){ return c + ',' + r; }
+function getCell(c, r){
+  if (c < 0 || r < 0 || c >= WCOLS || r >= WROWS) return null;
+  const k = cellKey(c, r);
+  let cell = cells.get(k);
+  if (cell) return cell;
+  const rd = rng(hash2(c, r));
+  const w = currentWeights(c, r);
+  // placement, not sampling: the region is the argmax at this cell — a lookup that nothing the user does
+  // can move. Border blur: a hashed 15% of cells take the second-best region when it is within reach.
+  let best = 0, second = -1;
+  for (let i = 1; i < w.length; i++) if (w[i] > w[best]) best = i;
+  for (let i = 0; i < w.length; i++) if (i !== best && (second < 0 || w[i] > w[second])) second = i;
+  const reg = best, total = w.reduce((a, v) => a + v, 0), share = w[best] / total;   // how decisive the place is here
+  const W = WORLDS[worldKey];
+  if (W.placed){                                             // a real world: the pipeline placed every item; nothing is sampled
+    const it = W.placed.get(k), ri = it ? W.regionIndex.get(it.region) : -1;
+    cell = it && ri >= 0 ? {
+      c, r, key: k, cur: ri, reg: ri, share: 1,
+      author: it.channel, cap: it.title, kind: 'reel', dur: it.seconds, frames: 1,
+      mins: Number.isFinite(Date.parse(it.publishedAt)) ? Math.max(1, Math.round((Date.now() - Date.parse(it.publishedAt)) / 60000)) : null, art: hash2(c*3+1, r*3+2),
+      x: c*PITCH + PITCH/2 + (rd()*2-1)*JITTER, y: r*PITCH + PITCH/2 + (rd()*2-1)*JITTER,
+      read: false, item: it,
+    } : { empty: true, c, r, key: k, reg, share };
+    cells.set(k, cell);
+    return cell;
+  }
+  let cur = best;
+  if (second >= 0 && rd() < SERENDIPITY && w[second] >= 0.35 * w[best]) cur = second;
+  // density = supply: a per-region constant decided by the hash alone — affinity never empties or fills a cell
+  const empty = cellDepth(c, r) > 1 || rd() > CURRENTS[cur].density;   // beyond the rim is dark land
+  const C = CURRENTS[cur];
+  cell = empty ? { empty: true, c, r, key: k, reg, share } : {
+    c, r, key: k, cur, reg, share,
+    author: C.authors[Math.floor(rd()*C.authors.length)],
+    cap: C.caps[Math.floor(rd()*C.caps.length)],
+    kind: KINDS[Math.floor(rd()*KINDS.length)],
+    dur: 18 + Math.floor(rd()*78), frames: 2 + Math.floor(rd()*5),
+    mins: 5 + Math.floor(rd()*800), art: hash2(c*3+1, r*3+2),
+    x: c*PITCH + PITCH/2 + (rd()*2-1)*JITTER, y: r*PITCH + PITCH/2 + (rd()*2-1)*JITTER,
+    read: false,
+  };
+  cells.set(k, cell);
+  return cell;
+}
+/* one meaning per channel: HUE = region; LIGHTNESS = read state; the intensity ramp lives on the nebula only. */
+/* lightness is the read state and nothing else. A fixed L lets hue leak into brightness (an HSL
+   yellow at L40 clears 4.5:1 against the ground while a blue at the same L fails 3:1), so every hue
+   is solved to the same contrast against --ground: read dots READ_CONTRAST, unread UNREAD_CONTRAST.
+   A read blue is exactly as dim as a read yellow. Mirrors src/lib/driftPalette.ts;
+   verify:driftpalette keeps the two in step. */
+const READ_CONTRAST = 3.5, UNREAD_CONTRAST = 8, GROUND_HEX = '#0B0E14';
+function hslToRgb(h, s, l){
+  const S = s / 100, L = l / 100, c = (1 - Math.abs(2 * L - 1)) * S, hp = ((h % 360) + 360) % 360 / 60, x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) [r, g, b] = [c, x, 0]; else if (hp < 2) [r, g, b] = [x, c, 0]; else if (hp < 3) [r, g, b] = [0, c, x];
+  else if (hp < 4) [r, g, b] = [0, x, c]; else if (hp < 5) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+  const m = L - c / 2; return [r + m, g + m, b + m];
+}
+function relLum([r, g, b]){ const lin = c => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b); }
+const GROUND_LUM = relLum([1, 3, 5].map(k => parseInt(GROUND_HEX.slice(k, k + 2), 16) / 255));
+function lightnessFor(h, s, target){
+  let lo = 10, hi = 96;
+  for (let k = 0; k < 28; k++){ const mid = (lo + hi) / 2; if ((relLum(hslToRgb(h, s, mid)) + 0.05) / (GROUND_LUM + 0.05) < target) lo = mid; else hi = mid; }
+  return Math.round(hi * 10) / 10;
+}
+function curColor(i){ const h = CURRENTS[i].hue; return `hsl(${h} 52% ${lightnessFor(h, 52, UNREAD_CONTRAST)}%)`; }
+function readColor(i){ const h = CURRENTS[i].hue; return `hsl(${h} 30% ${lightnessFor(h, 30, READ_CONTRAST)}%)`; }
+
+/* ===================== camera ============================================================== */
+const field = document.getElementById('field');
+let camX = 0, camY = 0, camVX = 0, camVY = 0;
+let glide = null, glideTimer = 0;
+
+let wallHit = false, wallDir = [0, 0];
+const steerAcc = [0, 0], steerLog = [];
+function clampCam(){
+  // the rim: the viewport centre never leaves the wheel — beyond it is dark land, and the thud says so
+  const hubX = HUB_C*PITCH, hubY = HUB_R*PITCH, maxR = RIM*PITCH;
+  const vx = camX + innerWidth/2 - hubX, vy = camY + innerHeight/2 - hubY, vr = Math.hypot(vx, vy);
+  let bx = camX, by = camY, outward = [0, 0];
+  if (vr > maxR){ const k = maxR / vr; bx = hubX + vx*k - innerWidth/2; by = hubY + vy*k - innerHeight/2; outward = [vx/vr, vy/vr]; }
+  const hit = (bx !== camX || by !== camY) && conveyorOn;
+  wallDir = hit ? outward : [0, 0];                          // which way the rim is: as deep as this world goes
+  if (hit && !wallHit){
+    wallHit = true; detent(performance.now(), 'wall'); field.dataset.wall = (field.dataset.wall|0) + 1;
+    // the wish "deeper than this world has" is logged as an explicit, clamped preference — no affinity changes
+    const [pb, pr] = polarPos();
+    steerLog.push({ dr: 1, dth: 0, clamped: true, bearing: Math.round(pb), radius: +pr.toFixed(2), t: Math.round(performance.now()) });
+    if (steerLog.length > 200) steerLog.shift();
+    field.dataset.steers = steerLog.length;
+    document.getElementById('live').textContent = 'as ' + WORLDS[worldKey].depth[1] + ' as this world goes';
+  } else if (!hit) wallHit = false;
+  camX = bx; camY = by;
+}
+function screenToWorld(sx, sy){ return [sx + camX, sy + camY]; }
+
+/* the nearest populated cell anywhere on screen — for a sparse real world where the ±2-cell scan finds nothing */
+function nearestVisibleCell(wx, wy){
+  const c0 = Math.max(0, Math.floor(camX/PITCH)), c1 = Math.min(WCOLS-1, Math.ceil((camX + innerWidth)/PITCH));
+  const r0 = Math.max(0, Math.floor(camY/PITCH)), r1 = Math.min(WROWS-1, Math.ceil((camY + innerHeight)/PITCH));
+  let best = null, bd = Infinity;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const cell = getCell(c, r); if (!cell || cell.empty) continue;
+    const d = (cell.x - wx)**2 + (cell.y - wy)**2; if (d < bd){ bd = d; best = cell; }
+  }
+  return best;
+}
+function nearestCell(wx, wy){
+  const cc = Math.round(wx/PITCH - 0.5), cr = Math.round(wy/PITCH - 0.5);
+  let best = null, bd = Infinity;
+  for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++){
+    const cell = getCell(cc+dc, cr+dr);
+    if (!cell || cell.empty) continue;
+    const dx = cell.x - wx, dy = cell.y - wy, d = dx*dx + dy*dy;
+    if (d < bd){ bd = d; best = cell; }
+  }
+  return best;
+}
+
+/* ===================== selection: hysteresis + detents (settled laws) ====================== */
+let sel = null, lastDeselAt = new Map(), lastTickAt = 0, dwellStart = 0;
+const HYST = 0.80, HYST_REENTRY = 0.70, REENTRY_MS = 50;
+/* rev. 3 — all ESTIMATES, tuned in the wrap.
+   TEXTURE: what a kind feels like. Native, full: Core Haptics transients (intensity, sharpness,
+   count) through the DetentHaptics plugin. Native, coarse: Capacitor's stock generators — a
+   photo is selectionChanged, a reel impact LIGHT, a carousel falls back to the selection tick
+   (one event per crossing, never a queued second). Android web: vibrate patterns. Everywhere:
+   the tick's timbre (tone, body, length, and a doubled transient for carousels — one buffer). */
+const TEXTURE = {
+  photo:    { intensity: 0.55, sharpness: 0.75, count: 1, gap: 0,  cap: 'selection', vibe: 12,           tone: 1900, body: 150, ms: 8,  gain: 0.13 },
+  reel:     { intensity: 0.85, sharpness: 0.30, count: 1, gap: 0,  cap: 'impact',    vibe: 18,           tone: 1150, body: 105, ms: 16, gain: 0.17 },
+  carousel: { intensity: 0.60, sharpness: 0.60, count: 2, gap: 34, cap: 'selection', vibe: [8, 22, 8],   tone: 1700, body: 150, ms: 8,  gain: 0.13, double: 34 },
+  boundary: { intensity: 0.70, sharpness: 0.40, count: 1, gap: 0,  cap: 'impact',    vibe: 20,           tone: 700,  body: 90,  ms: 22, gain: 0.16 },   // crossing into another region
+  wall:     { intensity: 0.90, sharpness: 0.30, count: 1, gap: 0,  cap: 'impact',    vibe: 30,           tone: 420,  body: 70,  ms: 30, gain: 0.20 },   // the world ends here
+};
+/* BLOOM: the ring nearest the selection swells into labels while the selection moves slowly over
+   the world — thumb speed plus streaming speed, one law for both grips. Shows under 350px/s,
+   hides above 560px/s (hysteresis — at 560 the selection changes ~13×/s and no label can be
+   read), at most six, never over the selection itself (a keep-out disc the thumb sits in). */
+const BLOOM = { R: PITCH*1.65, MAX: 6, SHOW_BELOW: 350, HIDE_ABOVE: 560, K: 520, C: 34, OUT: 15, KEEP_OUT: 26,
+  FONT: '11px -apple-system, "Segoe UI", system-ui, sans-serif' };
+let CUR_FILL = [], CUR_STROKE = [], CUR_READ = [];
+function buildPalette(){
+  CUR_FILL = CURRENTS.map((C, i) => curColor(i));
+  CUR_READ = CURRENTS.map((C, i) => readColor(i));
+  CUR_STROKE = CURRENTS.map(C => `hsla(${C.hue} ${C.sat+20}% 60% / .45)`);
+}
+buildPalette();
+/* a label that identifies: drop a leading article, keep two words for organisation names */
+function shortName(author){
+  const all = author.split(' '), w = all.filter((x, i) => !(i === 0 && /^(the|a|an)$/i.test(x)));
+  return all.length >= 3 ? w.slice(0, 2).join(' ') : w[0];
+}
+/* PARK (ported from the seed): a thumb under 20px/s for 120ms locks selection until it moves 0.35 pitch */
+const PARK = { SPEED: 20, MS: 120, UNLOCK: 0.35 };
+let parkLock = null, parkSince = 0, ticks = 0;
+
+function trySelect(wx, wy, now){
+  const cand = nearestCell(wx, wy);
+  if (!cand || (sel && cand.key === sel.key)) return;
+  if (sel){
+    const curd = Math.hypot(sel.x - wx, sel.y - wy);
+    const cd = Math.hypot(cand.x - wx, cand.y - wy);
+    const th = (now - (lastDeselAt.get(cand.key)||-1e9)) < REENTRY_MS ? HYST_REENTRY : HYST;
+    if (!(cd < curd * th)) return;
+    lastDeselAt.set(sel.key, now);
+    settleDwell(now);
+  }
+  setSelection(cand, now, true);
+}
+/* the signal table: scrub-past −0.1 · glance 0 · pause +0.3 · read +0.7 (open adds +1.0) */
+function settleDwell(now){
+  if (!sel) return;
+  const d = now - dwellStart;
+  if (d < 200 && speed > 600) affinityBoost(sel.cur, -0.1);
+  else if (d >= 600 && d < 1500) affinityBoost(sel.cur, 0.3);
+  else if (d >= 1500) affinityBoost(sel.cur, 0.7);
+}
+function setSelection(cell, now, tick){
+  if (sel && sel.key === cell.key) return;
+  const prev = sel; sel = cell;
+  const crossed = prev && prev.reg !== cell.reg && cell.share >= 0.34;             // a new place, by the land's own argmax — blends at the hub never tick
+  if (tick){ detent(now, crossed ? 'boundary' : cell.kind); spawnSparks(cell); }   // a new place is a longer tick
+  if (crossed){ document.getElementById('live').textContent = 'entering ' + CURRENTS[cell.reg].key; }
+  swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
+  cardContent(cell);
+  schedulePreview(cell);
+  dwellStart = now;
+  announce(cell);
+}
+
+/* detents — synchronous, ≥30ms gap, skip never queue, never during a system glide.
+   Haptic carrier, best-first: native Taptic via Capacitor when wrapped (selectionChanged IS
+   the iOS picker-detent generator), navigator.vibrate on Android web. iOS web has no carrier
+   (Apple patched the switch tick in iOS 26.5) — sound carries it there. All of this is inert on plain web — window.Capacitor simply isn't there. */
+let sndOn = true, audioCtx = null, tickBuf = null;
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canVibe = 'vibrate' in navigator;
+const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const CapHaptics = isNative ? window.Capacitor.registerPlugin('Haptics') : null;
+const DetentH = (isNative && window.Capacitor.isPluginAvailable && window.Capacitor.isPluginAvailable('DetentHaptics'))
+  ? window.Capacitor.registerPlugin('DetentHaptics') : null;   // scout/ios-extras — full texture when installed
+function hapticTick(kind, single){
+  const T = TEXTURE[kind] || TEXTURE.photo;
+  if (DetentH){ DetentH.tick({ intensity: T.intensity, sharpness: T.sharpness, count: single ? 1 : T.count, gap: T.gap }).catch(() => {}); return; }
+  if (CapHaptics){ (T.cap === 'impact' ? CapHaptics.impact({ style: 'LIGHT' }) : CapHaptics.selectionChanged()).catch(() => {}); return; }
+  if (canVibe) navigator.vibrate(single && Array.isArray(T.vibe) ? T.vibe[0] : T.vibe);
+  // iOS web has no carrier since iOS 26.5 patched the switch trick — the tick is sound there
+}
+function hapticStart(){
+  if (CapHaptics){ CapHaptics.selectionStart().catch(() => {}); return; }
+  if (canVibe) navigator.vibrate(5);
+}
+function hapticEnd(){ if (CapHaptics) CapHaptics.selectionEnd().catch(() => {}); }
+function hapticOpen(){ if (CapHaptics) CapHaptics.impact({ style: 'MEDIUM' }).catch(() => {}); }
+function detent(now, kind){
+  if (glide) return;
+  const gap = speed > 1200 || conveyorOn ? 40 : 30;
+  if (now - lastTickAt < gap) return;
+  kind = TEXTURE[kind] ? kind : 'photo';
+  const T = TEXTURE[kind];
+  // a doubled transient needs room: above ~650px/s the next crossing would land inside it, so the
+  // carousel collapses to one hit and the ratchet stays even; otherwise the gap arms from the pattern's END
+  const single = !!T.double && speed > 650;
+  lastTickAt = now + (single ? 0 : (T.double || 0));
+  hapticTick(kind, single);
+  field.dataset.tick = kind; field.dataset.ticks = ++ticks;
+  const buf = single ? tickBufs[kind + ':single'] : tickBufs[kind];
+  if (sndOn && audioCtx && buf){
+    const s = audioCtx.createBufferSource(); s.buffer = buf;
+    s.playbackRate.value = 0.97 + Math.random()*0.06;
+    const g = audioCtx.createGain(); g.gain.value = T.gain + Math.random()*0.03;
+    s.connect(g); g.connect(audioCtx.destination); s.start();
+  }
+}
+const tickBufs = {};
+function makeTick(T){
+  const sr = audioCtx.sampleRate, len = T.ms/1000 + (T.double ? T.double/1000 + T.ms/1000 : 0);
+  const b = audioCtx.createBuffer(1, Math.floor(sr*len), sr), ch = b.getChannelData(0);
+  const decay = 6.5 / (T.ms/1000);                       // the transient dies inside its own length
+  const hit = (t0, amp) => {
+    for (let i = Math.floor(t0*sr); i < ch.length; i++){
+      const t = i/sr - t0; if (t < 0) continue;
+      const e = Math.exp(-t*decay); if (e < 0.002) break;
+      ch[i] += amp * (Math.sin(2*Math.PI*T.tone*t)*0.6 + Math.sin(2*Math.PI*T.body*t)*0.35 + (Math.random()*2-1)*0.25) * e;
+    }
+  };
+  hit(0, 1); if (T.double) hit(T.double/1000, 0.8);
+  return b;
+}
+function initAudio(){
+  if (audioCtx) return;
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    for (const k of Object.keys(TEXTURE)){ tickBufs[k] = makeTick(TEXTURE[k]); if (TEXTURE[k].double) tickBufs[k + ':single'] = makeTick({ ...TEXTURE[k], double: 0 }); }
+    tickBuf = tickBufs.photo;
+  }catch(e){ audioCtx = null; }
+}
+
+/* ===================== springs ============================================================= */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function spring(k, c){ return {value:0, v:0, target:0, k, c}; }
+function step(s, dt, kMul){
+  if (reduceMotion){ s.value = s.target; s.v = 0; return; }
+  const k = s.k * (kMul||1);
+  // substep: explicit Euler at k≈2700 diverges past dt≈8ms, and a dropped frame hands us 32ms
+  const n = Math.max(1, Math.ceil(dt/0.008)), h = dt/n;
+  for (let i = 0; i < n; i++){
+    const a = -k*(s.value - s.target) - s.c*s.v;
+    s.v += a*h; s.value += s.v*h;
+  }
+}
+const hx = spring(900, 60), hy = spring(900, 60);
+const swell = spring(550, 30);
+swell.value = 1; swell.target = 1;
+let dispNow = new Map();
+const bloomRecs = new Map(); let bloomOn = false, lastBloomCount = -1, bloomSel = null, bloomNear = [];
+let litWords = [], litPending = '', litPendingT = 0, ringLit = 0, flyT0 = 0, lastLitWord = '';
+const byDist = (a, b) => a[0] - b[0];
+const placedPills = []; let lastLabelHit = -1, lastLabelSkipped = -1;
+
+/* ===================== pointer + conveyor ================================================== */
+let touching = false, hovering = false, px = 0, py = 0, speed = 0, velX = 0, velY = 0;
+let samples = [], firstTouch = true, conveyorOn = false;
+const cardEl = document.getElementById('card'), hintEl = document.getElementById('hint');
+let cardBelow = false, cardHiddenAt = 0, flipOff = null;
+/* conveyor ship numbers: band 72px · intent gate 60–600px/s outward × 80ms (or 150ms slow
+   in-band dwell) · v=880·smoothstep(p) · attack 180ms · release ZERO · cap 1100 combined */
+const EDGE = 72, V_MAX = 880, CAP = 1100;
+let armT = 0, bandT = 0;
+/* the drift ring — the user-tested fix for edge reach: a spring-loaded puck in the thumb's
+   home. Displacement = velocity vector, same envelope, same release-stops-dead law. While
+   steering, selection becomes the reticle near screen center that the world streams past. */
+const PUCK = { r: 44, knob: 14, dead: 7, max: 40 };
+let puckMode = false, puckCX = 0, puckCY = 0, flewOnce = false;
+function sizePuck(){ puckCX = innerWidth/2; puckCY = innerHeight - 92 - safeBottom(); }
+function safeBottom(){ const v = getComputedStyle(document.documentElement).getPropertyValue('--sab'); return parseFloat(v) || 0; }
+function reticle(){ return [innerWidth/2, innerHeight*0.42]; }
+
+let lastMoveAt = 0;
+function vel(now, x, y){
+  lastMoveAt = now;
+  samples.push([now, x, y]);
+  while (samples.length > 2 && now - samples[0][0] > 60) samples.shift();
+  const a = samples[0], dt = (now - a[0])/1000;
+  if (dt > 0.004){ velX = (x - a[1])/dt; velY = (y - a[2])/dt; speed = Math.hypot(velX, velY); }
+  else { velX = velY = speed = 0; }
+}
+
+const ripples = [];
+field.addEventListener('pointerdown', e => {
+  if (trailOn || postOn) return;
+  e.preventDefault();
+  field.setPointerCapture(e.pointerId);
+  touching = true; hovering = false; samples = []; glide = null; clearTimeout(glideTimer);
+  initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  hapticStart();                                  // activation primer — the first tap of the session
+  px = e.clientX; py = e.clientY;
+  const now = performance.now();
+  if (Math.hypot(px - puckCX, py - puckCY) < PUCK.r + 10){
+    puckMode = true;                              // the thumb is home; the world does the walking
+    try { if (!sessionStorage.getItem('drift.compass.flew')){ sessionStorage.setItem('drift.compass.flew', '1'); flyT0 = now; } } catch(e){ if (!flyT0 && !flewOnce){ flewOnce = true; flyT0 = now; } }
+    cardEl.classList.add('docked');
+    if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
+    return;
+  }
+  vel(now, px, py);
+  const [wx, wy] = screenToWorld(px, py);
+  if (!reduceMotion) ripples.push({ x: wx, y: wy, t0: now });
+  trySelect(wx, wy, now);
+  if (!sel){ const c = nearestCell(wx, wy); if (c) setSelection(c, now, true); }
+  cardEl.classList.remove('docked');
+  if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
+});
+field.addEventListener('pointermove', e => {
+  if (postOn || trailOn) return;
+  const now = performance.now();
+  if (puckMode){ px = e.clientX; py = e.clientY; return; }
+  if (touching){
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of evs){
+      vel(now, ev.clientX, ev.clientY);
+      // the park lock (from the seed): a resting thumb rolls a few px and must never tick
+      if (parkLock && Math.hypot(ev.clientX - parkLock.x, ev.clientY - parkLock.y) > PARK.UNLOCK*PITCH){ parkLock = null; parkSince = 0; }
+      if (parkLock) continue;
+      const [wx, wy] = screenToWorld(ev.clientX, ev.clientY);
+      trySelect(wx, wy, now);
+    }
+    px = e.clientX; py = e.clientY;
+  } else if (matchMedia('(hover:hover) and (pointer:fine)').matches){
+    hovering = true; px = e.clientX; py = e.clientY;
+    vel(now, px, py);
+    const [wx, wy] = screenToWorld(px, py);
+    trySelect(wx, wy, now);
+    cardEl.classList.remove('docked');
+  }
+});
+function endTouch(e, open){
+  if (!touching) return;
+  hapticEnd();
+  if (puckMode){                                   // stick release: the world stops, nothing opens
+    puckMode = false; touching = false;
+    setEdgeGlow(0, 0, false);
+    cardEl.classList.add('docked');
+    return;
+  }
+  touching = false; armT = bandT = 0; setEdgeGlow(0, 0, false);
+  const parked = !!parkLock;                       // a resting thumb's roll is noise, not aim
+  parkLock = null; parkSince = 0;
+  const now = performance.now();
+  settleDwell(now);
+  if (open && speed < 1000 && sel){
+    if (!parked){                                  // the 60ms projection is for a moving thumb only
+      const a = samples[0], dt = (now - a[0])/1000;
+      let lx = px, ly = py;
+      if (dt > 0.004){ lx += velX*0.06; ly += velY*0.06; }
+      const [wx, wy] = screenToWorld(lx, ly);
+      const proj = nearestCell(wx, wy);
+      if (proj && sel && proj.key !== sel.key) setSelection(proj, now, false);
+    }
+    openPost(sel);                                 // parked: open exactly what the card shows
+  } else if (sel){
+    maybeRecenter();
+  }
+  cardEl.classList.add('docked');
+}
+/* recenter-on-lift — the one orchestrated move: only past 62% of half-extent, 280–450ms by
+   √distance, 180ms grace, cancelled by any touch-down */
+function maybeRecenter(){
+  if (!sel) return;
+  const sx = sel.x - camX - innerWidth/2, sy = sel.y - camY - innerHeight/2;
+  if (Math.abs(sx) < 0.62*innerWidth/2 && Math.abs(sy) < 0.62*innerHeight/2) return;
+  const d = Math.hypot(sx, sy);
+  clearTimeout(glideTimer);
+  glideTimer = setTimeout(() => {
+    if (touching) return;
+    startGlide(sel.x - innerWidth/2, sel.y - innerHeight/2, Math.min(450, 280 + Math.sqrt(d)*6));
+  }, 180);
+}
+field.addEventListener('pointerup', e => endTouch(e, true));
+field.addEventListener('pointercancel', e => endTouch(e, false));
+field.addEventListener('pointerleave', () => { hovering = false; armT = bandT = 0; setEdgeGlow(0,0,false); cardEl.classList.add('docked'); });
+
+const eg = { N: document.getElementById('egN'), S: document.getElementById('egS'),
+             W: document.getElementById('egW'), E: document.getElementById('egE') };
+const vig = document.getElementById('vig');
+let egDir = [0, 0];
+function setEdgeGlow(tx, ty, on){
+  conveyorOn = on; egDir = on ? [Math.abs(tx) > 10 ? Math.sign(tx) : 0, Math.abs(ty) > 10 ? Math.sign(ty) : 0] : [0, 0];
+  eg.W.classList.toggle('on', on && tx < -10); eg.E.classList.toggle('on', on && tx > 10);
+  eg.N.classList.toggle('on', on && ty < -10); eg.S.classList.toggle('on', on && ty > 10);
+}
+function smoothstep(p){ return p*p*(3 - 2*p); }
+function bandVector(){
+  const t = 64, b = innerHeight - 40;
+  let ox = 0, oy = 0;
+  if (px < EDGE) ox = -smoothstep((EDGE - px)/EDGE);
+  else if (px > innerWidth - EDGE) ox = smoothstep((px - (innerWidth - EDGE))/EDGE);
+  if (py < t + EDGE && py > t - 10) oy = -smoothstep((t + EDGE - py)/EDGE);
+  else if (py > b - EDGE) oy = smoothstep((py - (b - EDGE))/EDGE);
+  return [ox, oy];
+}
+function startGlide(toX, toY, dur){
+  const mX = WORLD_W - innerWidth, mY = WORLD_H - innerHeight;
+  toX = mX > 0 ? Math.max(0, Math.min(mX, toX)) : mX/2;
+  toY = mY > 0 ? Math.max(0, Math.min(mY, toY)) : mY/2;
+  if (reduceMotion){ camX = toX; camY = toY; return; }
+  glide = { fromX: camX, fromY: camY, toX, toY, t0: performance.now(), dur };
+}
+function forge(t){ return 1 - Math.pow(1 - t, 3); }
+function pill(x, y, w, h, r){
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+/* ===================== canvas renderer — the luminous field ================================ */
+const cv = document.getElementById('fieldcv'), ctx = cv.getContext('2d');
+let DPR = 1;
+function sizeCanvas(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  cv.width = Math.round(innerWidth*DPR); cv.height = Math.round(innerHeight*DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+function makeSprite(size, stops){
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d').createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  for (const [o, col] of stops) g.addColorStop(o, col);
+  const x = c.getContext('2d'); x.fillStyle = g; x.fillRect(0, 0, size, size);
+  return c;
+}
+let glowSprites = [], nebulaSprites = [];
+function buildSprites(){
+  glowSprites = CURRENTS.map(C =>
+    makeSprite(64, [[0, `hsla(${C.hue} ${C.sat+42}% 64% / .85)`], [0.35, `hsla(${C.hue} ${C.sat+38}% 56% / .28)`], [1, 'hsla(0 0% 0% / 0)']]));
+  nebulaSprites = CURRENTS.map(C =>            // peak alpha .30 so belief can scale it .18 → .30 at draw time
+    makeSprite(256, [[0, `hsla(${C.hue} ${C.sat+28}% 48% / .30)`], [0.55, `hsla(${C.hue} ${C.sat+20}% 38% / .11)`], [1, 'hsla(0 0% 0% / 0)']]));
+}
+buildSprites();
+const bloomSprite = makeSprite(128, [[0, 'rgba(255,244,230,.95)'], [0.18, 'rgba(232,131,58,.55)'], [0.5, 'rgba(232,131,58,.16)'], [1, 'rgba(0,0,0,0)']]);
+const sparkSprite = makeSprite(24, [[0, 'rgba(255,236,214,.95)'], [0.5, 'rgba(232,131,58,.4)'], [1, 'rgba(0,0,0,0)']]);
+
+const sparks = [];
+function spawnSparks(cell){
+  if (reduceMotion) return;
+  const n = 6;
+  for (let i = 0; i < n; i++){
+    if (sparks.length > 70) sparks.shift();
+    const a = Math.random()*Math.PI*2, sp = 50 + Math.random()*110;
+    sparks.push({ x: cell.x, y: cell.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+                  t0: performance.now(), life: 300 + Math.random()*160, cur: cell.cur });
+  }
+}
+const comet = [];
+
+let drawDt = 0.016;
+function draw(now){
+  const dt = drawDt;
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  const pad = PITCH;
+  const c0 = Math.max(0, Math.floor((camX - pad)/PITCH)), c1 = Math.min(WCOLS-1, Math.ceil((camX + innerWidth + pad)/PITCH));
+  const r0 = Math.max(0, Math.floor((camY - pad)/PITCH)), r1 = Math.min(WROWS-1, Math.ceil((camY + innerHeight + pad)/PITCH));
+
+  ctx.globalCompositeOperation = 'lighter';
+  // the weather layer: regions as nebulas at their fixed places on the plane — legible before a touch
+  const nameSpots = [];
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i];
+    const x = R.cc*PITCH - camX, y = R.cr*PITCH - camY, sz = 460 * (R.spread/6.2);
+    if (x < -sz || y < -sz || x > innerWidth+sz || y > innerHeight+sz) continue;
+    ctx.globalAlpha = (R.glow || 0.18) / 0.30;          // belief: the one thing steering visibly changes in this demo
+    ctx.drawImage(nebulaSprites[i], x - sz/2, y - sz/2, sz, sz);
+    ctx.globalAlpha = 1;
+    const ny = y - R.spread*PITCH*0.42;                    // where the name will sit
+    if (x > -80 && x < innerWidth + 80 && ny > 96 && ny < innerHeight - 150) nameSpots.push([R, x, y]);   // clear of the chrome above and the ring below
+  }
+
+  // the trail, drawn on the land: a worn glowing route
+  if (trailPath.length > 1){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const n = trailPath.length;
+    for (let i = 1; i < n; i++){
+      const A = trailPath[i-1], B = trailPath[i], f = i/n;
+      ctx.strokeStyle = `rgba(232,131,58,${0.03 + 0.10*f})`; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(A[0]-camX, A[1]-camY); ctx.lineTo(B[0]-camX, B[1]-camY); ctx.stroke();
+      ctx.strokeStyle = `rgba(200,190,175,${0.05 + 0.22*f})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(A[0]-camX, A[1]-camY); ctx.lineTo(B[0]-camX, B[1]-camY); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'lighter';
+  }
+
+  // place names on the land — a map you can read before you touch it
+  if (nameSpots.length){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.font = 'italic 13px Charter, Georgia, "Times New Roman", serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [R, x, y] of nameSpots){
+      const here = sel && sel.cur === R.idx;
+      ctx.globalAlpha = here ? 0.62 : 0.30;
+      ctx.fillStyle = `hsl(${R.hue} ${R.sat+30}% 78%)`;
+      ctx.fillText(R.key, x, y - R.spread*PITCH*0.42);
+    }
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+    ctx.globalCompositeOperation = 'lighter';
+  }
+  // glow pass, then core pass — read dots are cooled embers, unread are lit
+  const camSpd = Math.hypot(camVX, camVY);
+  const streak = !reduceMotion && camSpd > 350;
+  const [prx, pry] = reticle();                            // thumbnails nearest the reticle load first
+  const sx = streak ? -camVX*0.02 : 0, sy = streak ? -camVY*0.02 : 0;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const cell = getCell(c, r);
+    if (!cell || cell.empty || cell === sel) continue;
+    const d = dispNow.get(cell.key);
+    const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+    if (cell.item) prefetchThumb(cell, (x - prx)**2 + (y - pry)**2);
+    const g = glowSprites[cell.cur];
+    if (cell.read){ ctx.globalAlpha = 0.10; ctx.drawImage(g, x-13, y-13, 26, 26); }
+    else {
+      ctx.globalAlpha = 0.55; ctx.drawImage(g, x-20, y-20, 40, 40);
+      if (streak){ ctx.globalAlpha = 0.22; ctx.drawImage(g, x-20+sx, y-20+sy, 40, 40); }
+    }
+  }
+  // sparks fly on every crossing
+  for (let i = sparks.length-1; i >= 0; i--){
+    const p = sparks[i], t = Math.max(0, (now - p.t0)/p.life);
+    if (t >= 1){ sparks.splice(i, 1); continue; }
+    const x = p.x + p.vx*t*(p.life/1000) - camX, y = p.y + p.vy*t*(p.life/1000) - camY;
+    ctx.globalAlpha = (1-t)*0.8;
+    ctx.drawImage(sparkSprite, x-6, y-6, 12, 12);
+  }
+  // the halo's comet tail
+  if (!reduceMotion){
+    for (let i = 0; i < comet.length; i++){
+      const p = comet[i], f = (i+1)/comet.length;
+      ctx.globalAlpha = f*0.25;
+      ctx.drawImage(bloomSprite, p[0]-camX-10, p[1]-camY-10, 20, 20);
+    }
+  }
+  // selection: ignition
+  if (sel){
+    const bs = 76*(0.85 + 0.25*swell.value);
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(bloomSprite, hx.value-camX-bs/2, hy.value-camY-bs/2, bs, bs);
+    ctx.globalAlpha = 0.8;
+    ctx.drawImage(glowSprites[sel.cur], sel.x-camX-26, sel.y-camY-26, 52, 52);
+  }
+
+  // core pass
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const cell = getCell(c, r);
+    if (!cell || cell.empty) continue;
+    const d = dispNow.get(cell.key);
+    const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+    const isSel = cell === sel;
+    const rad = Math.max(0.5, isSel ? 5.5*(1 + 0.55*swell.value) : 5);
+    ctx.globalAlpha = 1;                                 // read state is a solid colour, not an alpha — it stays legal
+    ctx.fillStyle = isSel ? '#F5EDE0' : (cell.read ? CUR_READ[cell.cur] : CUR_FILL[cell.cur]);
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+  }
+  // neighbour bloom: swollen dots and their labels, placed outward from the selection so the
+  // thumb never covers them; one pass of overlap relief; clamped inside the field
+  let bloomCount = 0, labelHit = 0, labelSkipped = 0;
+  if (bloomRecs.size){
+    ctx.font = BLOOM.FONT; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    const ax = (sel ? sel.x : hx.value) - camX, ay = (sel ? sel.y : hy.value) - camY, h = 18;
+    placedPills.length = 0;
+    const keepOut = (L, T, W, H) => {                 // circle–rect: does this pill touch the thumb's disc?
+      const cx = Math.max(L, Math.min(L + W, ax)), cy = Math.max(T, Math.min(T + H, ay));
+      return Math.hypot(cx - ax, cy - ay) < BLOOM.KEEP_OUT;
+    };
+    for (const rec of bloomRecs.values()){
+      const a = Math.max(0, Math.min(1, rec.a.value)); if (a <= 0.01) continue;
+      const cell = rec.cell, d = dispNow.get(cell.key);
+      const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+      if (x < -6 || x > innerWidth + 6 || y < 0 || y > innerHeight) continue;   // an off-screen dot gets no label
+      ctx.globalAlpha = a * (cell.read ? 0.55 : 1); ctx.fillStyle = CUR_FILL[cell.cur];
+      ctx.beginPath(); ctx.arc(x, y, 5 + 3.5*a, 0, 7); ctx.fill();
+      const ux0 = x - ax, uy0 = y - ay, um = Math.hypot(ux0, uy0) || 1, ux = ux0/um, uy = uy0/um, w = rec.w;
+      // candidates, in order: outward (centred when the neighbour is straight above/below), lateral, mirrored
+      const out = BLOOM.OUT + 4, side = ux >= 0 ? 1 : -1;
+      const cands = Math.abs(ux) < 0.5
+        ? [[x - w/2, y + uy*(out + 12) - h/2], [x + side*out, y - h/2], [x - side*out - w, y - h/2]]
+        : [[side > 0 ? x + ux*out : x + ux*out - w, y + uy*BLOOM.OUT - h/2], [x + side*out, y - h/2], [side > 0 ? x - out - w : x + out, y - uy*BLOOM.OUT - h/2]];
+      if (side < 0) cands[1] = [x - out - w, y - h/2];
+      let chosen = null;
+      for (let [left, top] of cands){
+        left = Math.max(4, Math.min(innerWidth - w - 4, left)); top = Math.max(60, Math.min(innerHeight - h - 132, top));
+        for (const p of placedPills){
+          if (left < p.left + p.w && left + w > p.left && top < p.top + p.h && top + h > p.top){ left += ux*16; top += (uy || 0.7)*16; }
+        }
+        left = Math.max(4, Math.min(innerWidth - w - 4, left)); top = Math.max(60, Math.min(innerHeight - h - 132, top));
+        if (!keepOut(left, top, w, h)){ chosen = [left, top]; break; }
+      }
+      if (!chosen){ labelSkipped++; continue; }      // no label beats a label under the thumb
+      const [left, top] = chosen;
+      placedPills.push({ left, top, w, h });
+      if (keepOut(left, top, w, h)) labelHit++;
+      ctx.globalAlpha = a * 0.92; ctx.fillStyle = 'rgba(19,24,34,.9)'; pill(left, top, w, h, 6); ctx.fill();
+      ctx.globalAlpha = a; ctx.lineWidth = 1; ctx.strokeStyle = CUR_STROKE[cell.cur]; ctx.stroke();
+      ctx.fillStyle = cell.read ? '#8A8FA3' : '#E8E4DA'; ctx.fillText(rec.text, left + 7, top + h/2 + 0.5);
+      if (rec.a.target === 1 && a > 0.3) bloomCount++;   // count what a person can read, arriving ring only
+    }
+    ctx.globalAlpha = 1; ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+  }
+  if (bloomCount !== lastBloomCount){ lastBloomCount = bloomCount; field.dataset.bloom = bloomCount; }
+  if (labelHit !== lastLabelHit || labelSkipped !== lastLabelSkipped){ lastLabelHit = labelHit; lastLabelSkipped = labelSkipped; field.dataset.labelHit = labelHit; field.dataset.labelSkipped = labelSkipped; }
+
+  // halo ring
+  if (sel){
+    const active = touching || hovering;
+    const R = Math.max(2, 17*(0.9 + 0.2*swell.value));
+    ctx.globalAlpha = active ? 0.95 : 0.6;
+    ctx.strokeStyle = '#E8833A'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(hx.value-camX, hy.value-camY, R, 0, 7); ctx.stroke();
+  }
+  // touch ripples
+  ctx.strokeStyle = 'rgba(232,131,58,.5)';
+  for (let i = ripples.length-1; i >= 0; i--){
+    const p = ripples[i], t = Math.max(0, (now - p.t0)/450);   // a frame stamp can precede the touch stamp
+    if (t >= 1){ ripples.splice(i, 1); continue; }
+    ctx.globalAlpha = (1-t)*0.5; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.x-camX, p.y-camY, 12 + t*70, 0, 7); ctx.stroke();
+  }
+
+  // the drift ring — screen-space, the thumb's home
+  const puckActive = puckMode && touching;
+  ctx.globalAlpha = puckActive ? 0.95 : 0.5;
+  ctx.strokeStyle = puckActive ? 'rgba(232,131,58,.55)' : 'rgba(86,92,110,.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(puckCX, puckCY, PUCK.r, 0, 7); ctx.stroke();
+  ctx.strokeStyle = puckActive ? 'rgba(232,131,58,.35)' : 'rgba(86,92,110,.35)';
+  for (let a = 0; a < 4; a++){
+    const ang = a*Math.PI/2;
+    ctx.beginPath();
+    ctx.moveTo(puckCX + Math.cos(ang)*(PUCK.r-6), puckCY + Math.sin(ang)*(PUCK.r-6));
+    ctx.lineTo(puckCX + Math.cos(ang)*(PUCK.r-1), puckCY + Math.sin(ang)*(PUCK.r-1));
+    ctx.stroke();
+  }
+  let kx = 0, ky = 0;
+  if (puckActive){
+    const dx = px - puckCX, dy = py - puckCY, mag = Math.hypot(dx, dy);
+    const cl = Math.min(mag, PUCK.max);
+    if (mag > 0){ kx = dx/mag*cl; ky = dy/mag*cl; }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.8;
+    ctx.drawImage(bloomSprite, puckCX + kx - 22, puckCY + ky - 22, 44, 44);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalAlpha = puckActive ? 1 : 0.55;
+  ctx.fillStyle = puckActive ? '#E8833A' : '#565C6E';
+  ctx.beginPath(); ctx.arc(puckCX + kx, puckCY + ky, PUCK.knob, 0, 7); ctx.fill();
+
+  // the compass, on a wheel: HOME marks the bearing to the hub on the rim and DEEPER sits opposite — the
+  // legend is two words and it turns with you. The kinds are printed on the land at their bearings. While
+  // you push, the depth word you head toward lights (and SHALLOWER replaces HOME), the kind ahead lights
+  // at the screen edge, both announced; ~90ms of hysteresis so a wobbling thumb never flickers the words.
+  // The first ring touch flies the eight kind names out to their bearings once, then they collapse.
+  {
+    const W = WORLDS[worldKey];
+    const [bearing, radius] = polarPos();
+    const atHub = radius < HUB;
+    let dirX = 0, dirY = 0, pushing = false;
+    if (puckActive && Math.hypot(kx, ky) > PUCK.dead){ dirX = kx; dirY = ky; pushing = true; }
+    else if (conveyorOn && (egDir[0] || egDir[1])){ dirX = egDir[0]; dirY = egDir[1]; pushing = true; }
+    const want = pushing ? headingWords(dirX, dirY) : [];
+    const wantKey = want.join('·');
+    if (wantKey !== litPending){ litPending = wantKey; litPendingT = now; }
+    if (!pushing || now - litPendingT > 90 || reduceMotion) litWords = want;
+    ringLit += ((pushing || puckActive ? 1 : 0) - ringLit) * Math.min(1, dt * 7.5);   // ≈400ms release fade
+    if (reduceMotion) ringLit = (pushing || puckActive) ? 1 : 0;
+    let fly = 0;
+    if (flyT0){ const e = (now - flyT0)/1000; fly = e < 0.6 ? forge(e/0.6) : e < 3.1 ? 1 : e < 3.7 ? 1 - forge((e-3.1)/0.6) : 0; if (e >= 3.7) flyT0 = 0; }
+    const [rx0, ry0] = reticle();
+    ctx.font = '11px -apple-system, "Segoe UI", system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    try { ctx.letterSpacing = '0.08em'; } catch(e){}
+    // a word just outside the ring along a unit vector (ux, uy): aligned away from the ring so it never overlaps it
+    const ringWord = (ux, uy, text, alpha, ember) => {
+      const d = PUCK.r + 9, x = puckCX + ux*d, y = puckCY + uy*d;
+      ctx.textAlign = Math.abs(ux) < 0.45 ? 'center' : (ux < 0 ? 'right' : 'left');
+      ctx.globalAlpha = alpha; ctx.fillStyle = ember ? '#E8833A' : '#8A8FA3';
+      ctx.fillText(text.toUpperCase(), x, y + (Math.abs(ux) < 0.45 ? Math.sign(uy || 1) * 4 : 0));
+    };
+    const a = bearing*Math.PI/180;
+    const hx_ = atHub ? 0 : -Math.cos(a), hy_ = atHub ? 1 : Math.sin(a);   // screen unit vector toward the hub (down = mainstream when you are in it)
+    const shallowLit = litWords.includes(WHEEL.lit[0]), deepLit = litWords.includes(WHEEL.lit[1]);
+    const atRim = wallDir[0] !== 0 || wallDir[1] !== 0;
+    const rest = 0.32 + 0.23*ringLit;
+    if (!fly){
+      ringWord(hx_, hy_, atHub ? W.depth[0] : (shallowLit ? WHEEL.lit[0] : WHEEL.home), shallowLit ? 0.95 : rest, shallowLit);
+      ringWord(-hx_, -hy_, WHEEL.lit[1], atRim ? 0.18 : (deepLit ? 0.95 : rest), deepLit);
+    }
+    // one-time fly-out: the eight kinds leave the ring for their bearings at the screen edge, hold, and return
+    if (fly > 0){
+      ctx.textAlign = 'center';
+      for (let i = 0; i < HUE_FAMILIES; i++){
+        const name = W.sectors[i]; if (!name) continue;
+        const sa = i * SECTOR_DEG * Math.PI/180, ux = Math.cos(sa), uy = -Math.sin(sa);
+        const x0 = puckCX + ux*(PUCK.r + 10), y0 = puckCY + uy*(PUCK.r + 10);
+        const ex = innerWidth/2 + ux*(innerWidth/2 - 48), ey = ry0 + uy*(uy < 0 ? (ry0 - 100) : (innerHeight - 160 - ry0));
+        ctx.globalAlpha = 0.25 + 0.6*fly; ctx.fillStyle = `hsl(${sectorHue(i)} 40% 78%)`;
+        ctx.fillText(name.toUpperCase(), x0 + (ex - x0)*fly, y0 + (ey - y0)*fly);
+      }
+    }
+    // you are here: a bead inside the ring at your place on the wheel — the knob is what you push, the bead is where you are
+    { const bx = Math.cos(a)*radius*0.7*PUCK.r, by = -Math.sin(a)*radius*0.7*PUCK.r;
+      ctx.globalAlpha = puckActive ? 0.9 : 0.5; ctx.fillStyle = '#8A8FA3';
+      ctx.beginPath(); ctx.arc(puckCX + bx, puckCY + by, 2.5, 0, 7); ctx.fill(); }
+    // the same words, at the screen edge you are travelling toward — the primary carrier while pushing
+    if (pushing && litWords.length && !fly){
+      const m = Math.hypot(dirX, dirY) || 1, ux = dirX/m, uy = dirY/m;
+      // the point where the push ray from the reticle meets the safe frame (14px sides, 96 top, 150 bottom)
+      const tx = ux > 0 ? (innerWidth - 14 - rx0)/ux : ux < 0 ? (14 - rx0)/ux : 1e9;
+      const ty = uy > 0 ? (innerHeight - 150 - ry0)/uy : uy < 0 ? (96 - ry0)/uy : 1e9;
+      const t = Math.min(tx, ty), ex = rx0 + ux*t, ey = ry0 + uy*t;
+      ctx.fillStyle = '#E8833A'; ctx.globalAlpha = 0.85;
+      ctx.textAlign = tx < ty ? (ux > 0 ? 'right' : 'left') : 'center';
+      ctx.fillText(litWords.join(' · ').toUpperCase(), ex, ey);
+      const litWord = litWords.join(' · ');
+      if (litWord !== lastLitWord){ lastLitWord = litWord; document.getElementById('live').textContent = litWord; }
+    } else if (lastLitWord){ lastLitWord = ''; }
+    try { ctx.letterSpacing = '0px'; } catch(e){}
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+  }
+
+  // the needle the world streams past
+  if (puckActive){
+    const [rx, ry] = reticle();
+    ctx.globalAlpha = 0.4; ctx.strokeStyle = '#E8833A'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(rx, ry, 24, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 0.6;
+    for (let a = 0; a < 4; a++){
+      const ang = a*Math.PI/2 + Math.PI/4;
+      ctx.beginPath();
+      ctx.moveTo(rx + Math.cos(ang)*24, ry + Math.sin(ang)*24);
+      ctx.lineTo(rx + Math.cos(ang)*30, ry + Math.sin(ang)*30);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ===================== the one rAF loop ==================================================== */
+let lastT = 0, lastUi = 0, lastPathAt = 0, lastPage = 0, prevCamX = 0, prevCamY = 0;
+function steerEvent(dr, dth, headB){                      // dr: +1 deeper / −1 shallower; dth: ±1 around the wheel (counter-clockwise +); headB: bearing you push toward
+  const [b, rad] = polarPos();
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i];
+    const dPos = ((R.bearing - b + 540) % 360) - 180, dHead = ((R.bearing - (headB ?? b) + 540) % 360) - 180;   // signed degrees
+    // ahead: deeper than here in the direction you push (from the hub that is the whole story), or around the wheel the way you turn
+    const along = (R.radius - rad) * dr * Math.max(0, Math.cos(dHead * Math.PI/180)) + Math.sin(dPos * Math.PI/180) * dth;
+    if (along > 0.15) affinityBoost(i, 0.4);
+  }
+  steerLog.push({ dr, dth, bearing: Math.round(b), radius: +rad.toFixed(2), head: Math.round(headB ?? b), t: Math.round(performance.now()) });
+  if (steerLog.length > 200) steerLog.shift();
+  field.dataset.steers = steerLog.length;
+}
+const trailPath = [];
+function frame(t){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.032, (t - lastT)/1000 || 0.016); lastT = t;
+
+  if (t - lastMoveAt > 80){ const f = Math.max(0, 1 - dt*8); velX *= f; velY *= f; speed *= f; }
+  if (touching && !puckMode){
+    const resting = t - lastMoveAt > 60 || speed < PARK.SPEED;   // stillness directly, not the decayed estimate
+    if (resting){ if (!parkSince) parkSince = t; else if (!parkLock && t - parkSince > PARK.MS) parkLock = { x: px, y: py }; }
+    else parkSince = 0;
+  } else { parkLock = null; parkSince = 0; }
+  let wantX = 0, wantY = 0, armed = false;
+  if (puckMode && touching){
+    const dx = px - puckCX, dy = py - puckCY, mag = Math.hypot(dx, dy);
+    const m = Math.max(0, Math.min(1, (mag - PUCK.dead) / (PUCK.max - PUCK.dead)));
+    if (m > 0){
+      armed = true;
+      const s = smoothstep(m) * V_MAX;
+      wantX = dx/mag*s; wantY = dy/mag*s;
+    }
+  } else if (touching || hovering){
+    const [ox, oy] = bandVector();
+    const inBand = ox !== 0 || oy !== 0;
+    if (inBand){
+      bandT = speed < 200 ? bandT + dt : 0;
+      const outward = velX*Math.sign(ox) + velY*Math.sign(oy);
+      armT = (outward > 60 && outward < 600) ? armT + dt : Math.max(0, armT - dt*2);
+      armed = armT >= 0.08 || bandT >= 0.15;
+      if (armed){
+        wantX = ox*V_MAX; wantY = oy*V_MAX;
+        const allowed = Math.max(0, CAP - speed);
+        const mag = Math.hypot(wantX, wantY);
+        if (mag > allowed && mag > 0){ wantX *= allowed/mag; wantY *= allowed/mag; }
+      }
+    } else { armT = 0; bandT = 0; }
+  } else { armT = 0; bandT = 0; }
+  setEdgeGlow(wantX, wantY, armed && (Math.abs(wantX) > 10 || Math.abs(wantY) > 10));
+  // steering IS a preference. It is measured in cells, not seconds: every 4 cells of net camera travel
+  // along an axis while armed is one explicit event — regions that lie ahead gain affinity, which in this
+  // demo changes only the nebula glow (the walked world never rewrites). Logged for the harness.
+  if (armed && (Math.abs(wantX) > 10 || Math.abs(wantY) > 10)){
+    // the displacement is decomposed on the wheel: radial (deeper / shallower) and tangential (around it).
+    // From the hub every direction is deeper.
+    const [b, rad] = polarPos(), a = b*Math.PI/180, dx = camX - prevCamX, dy = camY - prevCamY;
+    let ur = [Math.cos(a), -Math.sin(a)], ut = [-Math.sin(a), -Math.cos(a)];
+    if (rad < HUB){ const m = Math.hypot(wantX, wantY) || 1; ur = [wantX/m, wantY/m]; ut = [0, 0]; }
+    steerAcc[0] += dx*ur[0] + dy*ur[1]; steerAcc[1] += dx*ut[0] + dy*ut[1];
+    const headB = aheadPolar(wantX, wantY)[0];
+    if (Math.abs(steerAcc[0]) >= 4*PITCH){ steerEvent(Math.sign(steerAcc[0]), 0, headB); steerAcc[0] = 0; }
+    if (Math.abs(steerAcc[1]) >= 4*PITCH){ steerEvent(0, Math.sign(steerAcc[1]), headB); steerAcc[1] = 0; }
+    field.dataset.steer = headingWords(wantX, wantY).join(' ');
+  } else { steerAcc[0] = steerAcc[1] = 0; if (field.dataset.steer) field.dataset.steer = ''; }
+  prevCamX = camX; prevCamY = camY;
+
+  if (reduceMotion){
+    camVX = camVY = 0;
+    if (armed && t - lastPage > 350){
+      lastPage = t;
+      camX += Math.sign(Math.round(wantX))*innerWidth/2; camY += Math.sign(Math.round(wantY))*innerHeight/2;
+      clampCam();
+      const nowMs = performance.now();
+      if (puckMode){ const [rx, ry] = reticle(); trySelect(rx + camX, ry + camY, nowMs); }
+      else if (touching || hovering){ const [wx, wy] = screenToWorld(px, py); trySelect(wx, wy, nowMs); }
+      hapticStart();                                // "the page turned": a primer, never a detent — no gap, no counter
+    }
+  } else {
+    camVX += (wantX - camVX) * Math.min(1, dt*11);
+    if (!armed) camVX = Math.abs(camVX) < 40 ? 0 : camVX * Math.max(0, 1 - dt*22);
+    camVY += (wantY - camVY) * Math.min(1, dt*11);
+    if (!armed) camVY = Math.abs(camVY) < 40 ? 0 : camVY * Math.max(0, 1 - dt*22);
+    if (camVX || camVY){
+      camX += camVX*dt; camY += camVY*dt; clampCam();
+      if (puckMode){
+        const [rx, ry] = reticle();
+        trySelect(rx + camX, ry + camY, performance.now());   // the needle: dots stream past it
+      } else if (touching || hovering){
+        const now = performance.now();
+        const [wx, wy] = screenToWorld(px, py);
+        trySelect(wx, wy, now);
+      }
+    }
+  }
+  vig.classList.toggle('on', Math.hypot(camVX, camVY) > V_MAX*0.5);
+
+  if (glide){
+    const gt = Math.min(1, (t - glide.t0)/glide.dur), k = forge(gt);
+    camX = glide.fromX + (glide.toX - glide.fromX)*k;
+    camY = glide.fromY + (glide.toY - glide.fromY)*k;
+    if (gt >= 1) glide = null;
+  }
+  if (t - lastUi > 250){
+    lastUi = t; updateHome(); updatePulse();
+    field.dataset.cam = Math.round(camX) + ',' + Math.round(camY);   // for the probe/walkthrough tier
+  }
+  if (t - lastPathAt > 300){
+    lastPathAt = t;
+    const cx = camX + innerWidth/2, cy = camY + innerHeight/2;
+    const last = trailPath[trailPath.length-1];
+    if (!last || Math.hypot(cx-last[0], cy-last[1]) > 24) trailPath.push([cx, cy]);
+    if (trailPath.length > 500) trailPath.shift();
+  }
+
+  if (sel){
+    hx.target = sel.x; hy.target = sel.y;
+    const sep = Math.hypot(hx.value - sel.x, hy.value - sel.y);
+    const kMul = Math.min(3, Math.max(1, sep/35));
+    step(hx, dt, kMul); step(hy, dt, kMul);
+    step(swell, dt);
+    if (!reduceMotion && (touching || hovering)){
+      const last = comet[comet.length-1];
+      if (!last || Math.hypot(hx.value-last[0], hy.value-last[1]) > 4) comet.push([hx.value, hy.value]);
+      if (comet.length > 9) comet.shift();
+    } else comet.length = 0;
+
+    // the magnet sheet, canvas edition: neighbours lean away from the committed selection
+    const R = PITCH*2.05;
+    const next = new Map();
+    const cc = Math.round(sel.x/PITCH - 0.5), cr = Math.round(sel.y/PITCH - 0.5);
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++){
+      const cell = getCell(cc+dc, cr+dr);
+      if (!cell || cell.empty || cell === sel) continue;
+      const dx = cell.x - sel.x, dy = cell.y - sel.y, d = Math.hypot(dx, dy);
+      if (d > R || d === 0) continue;
+      const g = Math.exp(-(d*d)/(2*PITCH*PITCH)) * 6 * (reduceMotion ? 0 : swell.value);
+      const old = dispNow.get(cell.key) || {dx:0, dy:0};
+      next.set(cell.key, { dx: old.dx + (dx/d*g - old.dx)*0.4, dy: old.dy + (dy/d*g - old.dy)*0.4 });
+    }
+    for (const [k, rec] of dispNow){
+      if (next.has(k)) continue;
+      rec.dx *= 0.6; rec.dy *= 0.6;
+      if (Math.abs(rec.dx) + Math.abs(rec.dy) > 0.15) next.set(k, rec);
+    }
+    dispNow = next;
+  }
+
+  // neighbour bloom: the ring nearest the selection swells into labels while the thumb is slow —
+  // scent for the eye. Hysteretic on speed so a skim never clutters and a pause never flickers.
+  {
+    const active = touching || hovering;
+    const rel = speed + Math.hypot(camVX, camVY);   // the selection's speed over the world, in either grip
+    if (rel > BLOOM.HIDE_ABOVE || !active || !sel || postOn) bloomOn = false;
+    else if (rel < BLOOM.SHOW_BELOW) bloomOn = true;
+    if (bloomOn && sel !== bloomSel){               // the ring depends only on sel: scan once per selection, not per frame
+      bloomSel = sel; bloomNear = [];
+      const cc = Math.round(sel.x/PITCH - 0.5), cr = Math.round(sel.y/PITCH - 0.5);
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++){
+        const cell = getCell(cc+dc, cr+dr);
+        if (!cell || cell.empty || cell === sel) continue;
+        const d = Math.hypot(cell.x - sel.x, cell.y - sel.y);
+        if (d <= BLOOM.R) bloomNear.push([d, cell]);
+      }
+      bloomNear.sort(byDist); bloomNear = bloomNear.slice(0, BLOOM.MAX).map(x => x[1]);
+    }
+    const want = new Set();
+    if (bloomOn) for (const cell of bloomNear){
+      want.add(cell.key);
+      if (!bloomRecs.has(cell.key)){
+        ctx.font = BLOOM.FONT;                      // measured once per label, never per frame
+        const text = shortName(cell.author) + '  ' + (cell.kind === 'reel' ? '▶' : cell.kind === 'carousel' ? '▤' : '●');
+        bloomRecs.set(cell.key, { cell, text, w: ctx.measureText(text).width + 14, a: spring(BLOOM.K, BLOOM.C) });
+      }
+    }
+    for (const [k, rec] of bloomRecs){
+      rec.a.target = want.has(k) ? 1 : 0;
+      if (want.has(k)) step(rec.a, dt);
+      else if (reduceMotion) rec.a.value = 0;
+      else { rec.a.value *= Math.pow(bloomOn ? 0.72 : 0.45, dt*60); rec.a.v = 0; }   // leaving is faster than arriving, frame-rate independent
+      if (!want.has(k) && rec.a.value < 0.02) bloomRecs.delete(k);
+    }
+  }
+
+  drawDt = dt;
+  draw(t);
+  positionCard((touching || hovering) && !puckMode);
+}
+requestAnimationFrame(frame);
+
+function positionCard(active){
+  if (!active){
+    cardEl.style.transform = '';
+    cardEl.style.left = ''; cardEl.style.top = '68px';
+    cardEl.classList.remove('hidden');
+    cardEl.classList.remove('deep');
+    flipOff = null;
+    return;
+  }
+  const w = Math.min(innerWidth*0.88, 330);
+  const h = cardEl.classList.contains('deep') ? 300 : 262;
+  const x = Math.min(innerWidth - w - 12, Math.max(12, px - w/2));
+  if (!cardBelow && py - 90 - h < 24) cardBelow = true;
+  else if (cardBelow && py - 90 - h > 64) cardBelow = false;
+  const targetOff = cardBelow ? 90 : -90 - h;
+  if (flipOff === null || reduceMotion) flipOff = targetOff;
+  else flipOff += (targetOff - flipOff) * 0.35;
+  const y = Math.min(innerHeight - h - 8, Math.max(4, py + flipOff));
+  cardEl.classList.remove('docked');
+  cardEl.style.left = '0px'; cardEl.style.top = '0px';
+  cardEl.style.transform = `translate(${x}px, ${y}px)`;
+  const now = performance.now();
+  if (speed > 1500){ cardEl.classList.add('hidden'); cardHiddenAt = now; }
+  else if (cardEl.classList.contains('hidden') && now - cardHiddenAt > 80 && speed < 900) cardEl.classList.remove('hidden');
+  cardEl.classList.toggle('deep', now - dwellStart > 1200);
+}
+
+/* ===================== preview content ===================================================== */
+const mediaCache = new Map();
+function art(cell, w, h){
+  const key = cell.key + 'x' + w;
+  if (mediaCache.has(key)) return mediaCache.get(key);
+  const cvv = document.createElement('canvas'); cvv.width = w; cvv.height = h;
+  const x2 = cvv.getContext('2d'), r = rng(cell.art);
+  const C = CURRENTS[cell.cur];
+  const h1 = C.hue + r()*24 - 12;
+  const g = x2.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, `hsl(${h1} ${C.sat+16}% ${16 + r()*10}%)`);
+  g.addColorStop(1, `hsl(${h1 + 30} ${C.sat}% ${7 + r()*6}%)`);
+  x2.fillStyle = g; x2.fillRect(0, 0, w, h);
+  if (r() > 0.45){
+    x2.beginPath();
+    x2.arc(w*(0.2 + r()*0.6), h*(0.18 + r()*0.3), 8 + r()*h*0.09, 0, 7);
+    x2.fillStyle = `hsla(${h1+10} 60% 78% / ${0.25 + r()*0.4})`; x2.fill();
+  }
+  for (let l = 0; l < 3; l++){
+    x2.beginPath();
+    let y = h*(0.45 + l*0.16 + r()*0.06); x2.moveTo(-4, y);
+    for (let xx = 0; xx <= w; xx += w/14){ y += (r()*2-1)*h*0.07; y = Math.min(h-4, Math.max(h*0.3, y)); x2.lineTo(xx, y); }
+    x2.lineTo(w+4, h+4); x2.lineTo(-4, h+4); x2.closePath();
+    x2.fillStyle = `hsla(${h1 + 24 + l*10} ${C.sat+6}% ${10 - l*2}% / ${0.75})`;
+    x2.fill();
+  }
+  if (cell.kind === 'reel'){
+    x2.fillStyle = 'rgba(232,228,218,.85)';
+    x2.beginPath(); const cx = w-26, cy = 22;
+    x2.moveTo(cx-5, cy-7); x2.lineTo(cx+7, cy); x2.lineTo(cx-5, cy+7); x2.closePath(); x2.fill();
+  }
+  if (cell.kind === 'carousel'){
+    x2.strokeStyle = 'rgba(232,228,218,.7)'; x2.lineWidth = 1.5;
+    x2.strokeRect(w-34, 12, 16, 12); x2.strokeRect(w-30, 16, 16, 12);
+  }
+  if (mediaCache.size > 400) mediaCache.clear();
+  mediaCache.set(key, cvv);
+  return cvv;
+}
+const cm = document.getElementById('cmedia'), cmx = cm.getContext('2d');
+function ageStr(m){ if (m == null || !Number.isFinite(m)) return ''; return m < 60 ? m + 'm' : m < 1440 ? Math.round(m/60) + 'h' : Math.round(m/1440) + 'd'; }
+function kindStr(p){
+  const mmss = `${Math.floor(p.dur/60)}:${String(p.dur%60).padStart(2,'0')}`;
+  if (p.item) return `short · ${mmss}`;
+  return p.kind === 'reel' ? `reel · ${mmss}`
+       : p.kind === 'carousel' ? `carousel · ${p.frames} frames` : 'photo';
+}
+function handleOf(name){ return '@' + name.toLowerCase().replace(/[^a-z]+/g, ''); }
+/* ---- instant preview. Thumbnails are prefetched around the reticle (nearest first, six in flight) so the card
+   paints on the same frame the selection changes; the selected item jumps the queue. After a short dwell a MUTED
+   preview of the short plays inside the card — YouTube's own player, one instance reused — never in a host that
+   blocks players (DRIFT_SANDBOX), never under reduced motion, never while the post is open. An edition may carry
+   thumbnails inline as thumbData (the artifact does, since its host blocks image hosts). ---- */
+const thumbCache = new Map(), thumbQueue = []; let thumbInFlight = 0; const THUMB_CONCURRENCY = 6;
+function thumbSrc(it){ return it.thumbData || (it.embedId ? 'https://i.ytimg.com/vi/' + encodeURIComponent(it.embedId) + '/mqdefault.jpg' : it.thumb); }
+function startThumb(img, url){
+  thumbInFlight++;
+  const done = () => { thumbInFlight--; pumpThumbs(); };
+  img.addEventListener('load', done, { once: true }); img.addEventListener('error', done, { once: true });
+  img.src = url;
+}
+function pumpThumbs(){
+  thumbQueue.sort((a, b) => a[0] - b[0]);
+  while (thumbInFlight < THUMB_CONCURRENCY && thumbQueue.length){
+    const [, url] = thumbQueue.shift(), img = thumbCache.get(url);
+    if (img && !img.src) startThumb(img, url);
+  }
+}
+function prefetchThumb(cell, priority){
+  const url = cell.item && thumbSrc(cell.item); if (!url || thumbCache.has(url)) return;
+  const img = new Image(); img.decoding = 'async'; img.referrerPolicy = 'no-referrer'; thumbCache.set(url, img);
+  thumbQueue.push([priority, url]); pumpThumbs();
+}
+function drawThumb(cell, ctx2, w, h, stillWanted){
+  const url = cell.item && thumbSrc(cell.item); if (!url) return;
+  if (!thumbCache.has(url)) prefetchThumb(cell, -1);
+  const img = thumbCache.get(url);
+  if (!img.src) startThumb(img, url);                         // the selection never waits behind the queue
+  const paint = () => {
+    if (!stillWanted() || !img.naturalWidth) return;
+    const sc = Math.max(w/img.naturalWidth, h/img.naturalHeight), dw = img.naturalWidth*sc, dh = img.naturalHeight*sc;
+    ctx2.drawImage(img, (w - dw)/2, (h - dh)/2, dw, dh);
+  };
+  if (img.complete && img.naturalWidth){ paint(); return; }
+  img.addEventListener('load', paint, { once: true });
+}
+const PREVIEW_DWELL = 650;                                  // ms still on a real short before its muted preview starts (ESTIMATE)
+let previewTimer = 0, previewCell = null, ytPlayer = null, ytLoading = false, ytPending = null;
+function previewAllowed(){ return !window.DRIFT_SANDBOX && !reduceMotion; }
+function ensureYT(cb){
+  if (window.YT && window.YT.Player){ cb(); return; }
+  ytPending = cb;
+  if (!ytLoading){
+    ytLoading = true;
+    window.onYouTubeIframeAPIReady = () => { const f = ytPending; ytPending = null; if (f) f(); };
+    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api'; sc.async = true;
+    sc.onerror = () => { ytLoading = false; ytPending = null; };
+    document.head.appendChild(sc);
+  }
+}
+function schedulePreview(cell){
+  stopPreview();
+  if (!cell || !cell.item || !cell.item.embedId || !previewAllowed()) return;
+  previewTimer = setTimeout(() => startPreview(cell), PREVIEW_DWELL);
+}
+function startPreview(cell){
+  if (sel !== cell || postOn) return;
+  ensureYT(() => {
+    if (sel !== cell || postOn) return;
+    previewCell = cell;
+    const el = document.getElementById('cpreview'); if (el) el.style.display = 'block';
+    const id = cell.item.embedId;
+    try {
+      if (!ytPlayer){
+        ytPlayer = new YT.Player('cpreview', { videoId: id,
+          playerVars: { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, disablekb: 1, loop: 1, playlist: id },
+          events: { onReady: e => { e.target.mute(); if (previewCell === cell) e.target.playVideo(); else e.target.pauseVideo(); } } });
+      } else { ytPlayer.mute(); ytPlayer.loadVideoById(id); }
+    } catch (e) { stopPreview(); }
+  });
+}
+function stopPreview(){
+  clearTimeout(previewTimer); previewTimer = 0; previewCell = null;
+  const el = document.getElementById('cpreview'); if (el) el.style.display = 'none';
+  if (ytPlayer && typeof ytPlayer.pauseVideo === 'function'){ try { ytPlayer.pauseVideo(); } catch (e) {} }
+}
+function cardContent(cell){
+  cmx.drawImage(art(cell, 330, 150), 0, 0);
+  drawThumb(cell, cmx, 330, 150, () => sel === cell);
+  const col = curColor(cell.cur);
+  const td = document.getElementById('ctdot');
+  td.style.background = col; td.style.color = col;
+  document.getElementById('cauthor').textContent = cell.author;
+  document.getElementById('chandle').textContent = cell.item ? (cell.item.embedId ? 'on YouTube' : 'fixture') : handleOf(cell.author);
+  document.getElementById('cage').textContent = ageStr(cell.mins);
+  document.getElementById('ccap').textContent = cell.cap;
+  document.getElementById('ckind').textContent = kindStr(cell);
+  document.getElementById('ccur').textContent = CURRENTS[cell.cur].key + (CURRENTS[cell.cur].tag ? ' · ' + CURRENTS[cell.cur].tag : '');
+}
+let announceTimer = 0;
+function announce(cell){
+  clearTimeout(announceTimer);
+  announceTimer = setTimeout(() => {
+    document.getElementById('live').textContent = cell.author + '. ' + cell.cap;
+  }, 500);
+}
+
+/* ===================== post view + trail =================================================== */
+let postOn = false;
+const postEl = document.getElementById('post');
+const journey = [];
+let postCell = null;
+function openPost(cell){
+  postOn = true; postCell = cell; stopPreview();
+  const pm = document.getElementById('pmedia'), frame = document.getElementById('pframe');
+  if (cell.item && cell.item.embedId && !window.DRIFT_SANDBOX){   // a real short: YouTube's own player, nothing copied
+    pm.style.display = 'none'; frame.style.display = 'block';
+    frame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');   // granted only when a real player opens
+    frame.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(cell.item.embedId) + '?playsinline=1&rel=0&modestbranding=1&autoplay=1';
+  } else {
+    frame.style.display = 'none'; frame.removeAttribute('src'); pm.style.display = '';
+    pm.height = Math.round(Math.min(innerHeight*0.55, innerWidth*0.78));
+    pm.width = innerWidth;
+    pm.getContext('2d').drawImage(art(cell, innerWidth, pm.height), 0, 0);
+    drawThumb(cell, pm.getContext('2d'), pm.width, pm.height, () => postOn && postCell === cell);
+  }
+  const col = curColor(cell.cur);
+  const td = document.getElementById('ptdot');
+  td.style.background = col; td.style.color = col;
+  document.getElementById('pauthor').textContent = cell.author + '  ' + (cell.item ? (cell.item.embedId ? '· YouTube' : '· fixture') : handleOf(cell.author));
+  document.getElementById('page').textContent = ageStr(cell.mins);
+  document.getElementById('pcap').textContent = cell.cap;
+  document.getElementById('pmeta').textContent = kindStr(cell) + ' · ' + CURRENTS[cell.cur].key +
+    (cell.item ? (cell.item.embedId ? (window.DRIFT_SANDBOX ? ' · YouTube — this preview cannot embed the player; tap the title to watch' : ' · YouTube') : ' · fixture — no player') : '');
+  if (cell.item && cell.item.embedId && window.DRIFT_SANDBOX){   // a host that blocks the player: the title becomes the way out to YouTube
+    const cap = document.getElementById('pcap'); cap.textContent = '';
+    const a = document.createElement('a'); a.href = 'https://www.youtube.com/shorts/' + encodeURIComponent(cell.item.embedId);
+    a.target = '_blank'; a.rel = 'noopener'; a.style.color = 'inherit'; a.textContent = cell.item.title; cap.appendChild(a);
+  }
+  postEl.classList.add('on');
+  for (const el of document.body.children) if (el !== postEl && el.id !== 'live') el.inert = true;   // Tab stays in the dialog; Escape still closes it unless the player itself has focus
+  document.getElementById('pclose').focus();
+  hapticOpen();
+  markRead(cell, true);
+  affinityBoost(cell.cur, 1.0);
+}
+function closePost(){
+  postOn = false; postCell = null; postEl.classList.remove('on');
+  if (sel) schedulePreview(sel);
+  for (const el of document.body.children) el.inert = false;
+  { const frame = document.getElementById('pframe'); frame.removeAttribute('src'); frame.style.display = 'none'; document.getElementById('pmedia').style.display = ''; }
+  cardEl.classList.add('docked');
+  maybeRecenter();
+  field.focus();
+}
+document.getElementById('pclose').addEventListener('click', closePost);
+function markRead(cell, opened){
+  if (!cell.read){
+    cell.read = true;
+    journey.push({ cell, opened: !!opened });
+  } else if (opened){
+    const j = journey.find(j => j.cell === cell);
+    if (j) j.opened = true;
+  }
+}
+function updatePulse(){
+  document.getElementById('pulse').textContent = 'felt ' + journey.length;
+}
+setInterval(() => {
+  if ((touching || hovering) && sel && performance.now() - dwellStart > 1200) markRead(sel, false);
+}, 300);
+
+let trailOn = false;
+const trailEl = document.getElementById('trail');
+function buildTrail(){
+  trailEl.textContent = '';
+  if (!journey.length){
+    const d = document.createElement('div'); d.className = 'empty';
+    d.textContent = 'Nothing felt yet. Drift a while — everything you rest on collects here, in order.';
+    trailEl.appendChild(d); return;
+  }
+  const lead = document.createElement('div'); lead.className = 'lead';
+  lead.textContent = 'Your drift so far — ' + journey.length + ' stops, in order. Tap one to glide back to it.';
+  trailEl.appendChild(lead);
+  journey.forEach(j => {
+    const b = document.createElement('button');
+    b.className = 'row' + (j.opened ? ' opened' : '');
+    b.innerHTML = `<span class="tdot"></span>
+      <span class="txt"><span class="l1"><b></b> <span class="cur"></span></span><span class="l2"></span></span>
+      <span class="mark"></span>`;
+    const col = curColor(j.cell.cur);
+    const td = b.querySelector('.tdot'); td.style.background = col; td.style.color = col;
+    b.querySelector('b').textContent = j.cell.author;
+    b.querySelector('.cur').textContent = '· ' + CURRENTS[j.cell.cur].key;
+    b.querySelector('.l2').textContent = j.cell.cap;
+    b.querySelector('.mark').textContent = j.opened ? 'opened' : 'felt';
+    b.addEventListener('click', () => {
+      setView(false);
+      setSelection(j.cell, performance.now(), false);
+      startGlide(j.cell.x - innerWidth/2, j.cell.y - innerHeight/2, 650);
+    });
+    trailEl.appendChild(b);
+  });
+}
+function setView(trail){
+  trailOn = trail;
+  if (trail) buildTrail();
+  trailEl.classList.toggle('on', trail);
+  field.style.display = trail ? 'none' : '';
+  cardEl.style.display = trail ? 'none' : '';
+  hintEl.style.display = trail ? 'none' : '';
+  document.getElementById('tabDrift').classList.toggle('on', !trail);
+  document.getElementById('tabTrail').classList.toggle('on', trail);
+  document.getElementById('tabDrift').setAttribute('aria-selected', String(!trail));
+  document.getElementById('tabTrail').setAttribute('aria-selected', String(trail));
+  if (!trail) field.focus();
+}
+document.getElementById('tabDrift').addEventListener('click', () => setView(false));
+document.getElementById('tabTrail').addEventListener('click', () => setView(true));
+
+/* ===================== instruments ========================================================= */
+setInterval(() => { if (!touching) updateDriftLabel(); }, 2000);
+function updateDriftLabel(){
+  const [bearing, radius] = polarPos();
+  const el = document.getElementById('driftlabel');
+  let populated = 0; for (const c of cells.values()) if (!c.empty) populated++;
+  const Wp = WORLDS[worldKey];
+  const pct = Wp.placed ? Math.round(100*populated/Math.max(1, Wp.items))    // of today's drop, how much has passed under you
+                        : Math.round(100*populated/(DISC_CELLS*0.8));        // of the cells inside the rim a full walk would fill (ESTIMATE of mean density)
+  const here = dominantRegion();
+  // priority: the place implies the depth, so the depth word appears only when no place dominates (fits 390px)
+  const parts = [WORLDS[worldKey].name, here >= 0 ? 'in ' + CURRENTS[here].key : depthWord(radius)].filter(Boolean);
+  // belief glow moves on the label's clock, never mid-gesture
+  if (!touching) for (let i = 0; i < CURRENTS.length; i++) CURRENTS[i].glow = 0.18 + 0.12 * Math.max(0, Math.min(1, affinity[i] / 4));
+  el.innerHTML = '<b></b>';
+  el.querySelector('b').textContent = parts.join(' · ') + ' · ' + pct + '% walked';
+  field.dataset.plane = Math.round(bearing) + ',' + radius.toFixed(2); field.dataset.world = worldKey;
+}
+const homeBtn = document.getElementById('homebtn');
+const ARROWS = ['→','↘','↓','↙','←','↖','↑','↗'];
+let homeX = 0, homeY = 0, homeFlashT = 0;
+function updateHome(){
+  if (performance.now() < homeFlashT) return;
+  const dx = homeX - camX, dy = homeY - camY;
+  const screens = Math.hypot(dx, dy) / Math.min(innerWidth, innerHeight);
+  if (screens < 0.6){ homeBtn.textContent = 'home'; return; }
+  const oct = Math.round(((Math.atan2(dy, dx) + Math.PI*2) % (Math.PI*2)) / (Math.PI/4)) % 8;
+  homeBtn.textContent = '⌂ ' + (screens < 10 ? screens.toFixed(1) : Math.round(screens)) + ' ' + ARROWS[oct];
+}
+homeBtn.addEventListener('click', () => {
+  const d = Math.hypot(camX - homeX, camY - homeY);
+  if (d < Math.min(innerWidth, innerHeight)*0.6){
+    homeBtn.textContent = 'you are here';
+    homeFlashT = performance.now() + 3000;
+    setTimeout(updateHome, 3050);
+  } else startGlide(homeX, homeY, Math.min(900, 400 + d/4));
+});
+
+/* haptics honesty: say what THIS device/context can do, and how to unlock more */
+const hapchip = document.getElementById('hapchip');
+const embedded = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+function setupHapchip(){
+  if (CapHaptics){ hapchip.textContent = ''; return; }
+  if (canVibe && embedded){
+    hapchip.textContent = 'ticks are muted in embedded previews — ';
+    const a = document.createElement('a');
+    a.href = location.href; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'open full screen for haptics ↗';
+    hapchip.appendChild(a);
+  } else if (!canVibe && isIOS){
+    hapchip.textContent = 'iPhone Safari has no web vibration — sound on, the ticks carry it';
+  } else hapchip.textContent = '';
+}
+function fadeHapchipSoon(){ setTimeout(() => { hapchip.style.opacity = '0'; }, 6000); }
+setupHapchip();
+document.getElementById('haptest').addEventListener('click', () => {
+  const out = document.getElementById('hapresult');
+  if (CapHaptics){
+    CapHaptics.impact({ style: 'HEAVY' }).catch(() => {});
+    out.textContent = DetentH ? 'native Core Haptics ✓ — full texture' : 'native Taptic ✓ — stock tick (reels differ; add DetentHaptics for full texture)';
+  } else if (canVibe){
+    const ok = navigator.vibrate(120);
+    out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
+  } else if (isIOS){
+    out.textContent = 'no web vibration on iPhone — ringer on, the tick carries it; the detent lives in the wrap';
+  } else out.textContent = 'no vibration API in this browser';
+});
+
+/* ===================== keyboard ============================================================ */
+field.addEventListener('keydown', e => {
+  if (postOn) return;
+  const k = e.key;
+  let dc = 0, dr = 0;
+  if (k === 'ArrowRight') dc = 1; else if (k === 'ArrowLeft') dc = -1;
+  else if (k === 'ArrowDown') dr = 1; else if (k === 'ArrowUp') dr = -1;
+  else if (k === 'Enter' && sel){ e.preventDefault(); openPost(sel); return; }
+  else if (k === 'h' || k === 'H'){ e.preventDefault(); homeBtn.click(); return; }
+  else if (k === 'w' || k === 'W'){ e.preventDefault(); switchWorld(WORLD_KEYS[(WORLD_KEYS.indexOf(worldKey) + 1) % WORLD_KEYS.length]); return; }
+  if (e.shiftKey && (dc || dr)){                             // steer by keyboard: half a screen, one explicit event, the word spoken
+    e.preventDefault();
+    const words = headingWords(dc, dr);
+    { const [b] = polarPos(), a = b*Math.PI/180, mv = [dc*innerWidth/2, dr*innerHeight/2];
+      const rad = mv[0]*Math.cos(a) - mv[1]*Math.sin(a), tan = -mv[0]*Math.sin(a) - mv[1]*Math.cos(a);
+      steerEvent(Math.abs(rad) >= Math.abs(tan) ? Math.sign(rad) : 0, Math.abs(tan) > Math.abs(rad) ? Math.sign(tan) : 0, aheadPolar(dc, dr)[0]); }
+    startGlide(camX + dc*innerWidth/2, camY + dr*innerHeight/2, 350);
+    document.getElementById('live').textContent = words.join(' · ');
+    return;
+  }
+  else return;
+  e.preventDefault();
+  if (!sel) return;
+  const now = performance.now();
+  settleDwell(now);
+  let c = sel.c + dc, r = sel.r + dr, tries = 0;
+  let cell = getCell(c, r);
+  while (cell && cell.empty && tries++ < 6){ c += dc || 1; r += dr; cell = getCell(c, r); }
+  if (!cell || cell.empty) return;
+  setSelection(cell, now, true);
+  const sx = cell.x - camX, sy = cell.y - camY;
+  const target = { x: camX, y: camY };
+  if (sx < 80) target.x = cell.x - 80; else if (sx > innerWidth - 80) target.x = cell.x - innerWidth + 80;
+  if (sy < 190) target.y = cell.y - 190; else if (sy > innerHeight - 90) target.y = cell.y - innerHeight + 90;
+  if (target.x !== camX || target.y !== camY) startGlide(target.x, target.y, 200);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape'){
+    if (worldStrip.classList.contains('on')){ worldStrip.classList.remove('on'); worldChip.setAttribute('aria-expanded', 'false'); }
+    else if (postOn) closePost();
+    else document.getElementById('feelcard').classList.remove('on');
+  }
+});
+
+/* ===================== HUD + boot ========================================================== */
+function resetWorld(){
+  cells.clear(); mediaCache.clear(); affinity.fill(0); journey.length = 0; trailPath.length = 0;
+  sparks.length = 0; ripples.length = 0; comet.length = 0;
+  sel = null; dispNow.clear(); cardEl.classList.add('hidden'); stopPreview();
+  bloomRecs.clear(); bloomOn = false; bloomSel = null; bloomNear = []; lastBloomCount = -1; parkLock = null; parkSince = 0;
+  ticks = 0; field.dataset.ticks = 0;
+  camVX = camVY = 0; glide = null; clearTimeout(glideTimer);
+  boot(); updateDriftLabel();
+}
+document.getElementById('restart').addEventListener('click', resetWorld);
+/* switching worlds keeps the wheel and changes the kinds: same bearing and depth, new regions, fresh geography */
+const worldChip = document.getElementById('worldchip'), worldStrip = document.getElementById('worldstrip');
+function switchWorld(key){
+  if (!WORLDS[key] || touching) return;                       // never under a held thumb — lift first, then switch
+  const [keepB, keepR] = polarPos();                          // your place on the wheel survives the switch
+  worldKey = key; CURRENTS = WORLDS[key].regions; WORLD_SEED = SEED ^ (WORLD_KEYS.indexOf(key) * 7919);
+  placeRegions(); affinity = new Array(CURRENTS.length).fill(0); buildPalette(); buildSprites();
+  if (postOn) closePost();
+  resetWorld(); renderWorldChrome(); worldStrip.classList.remove('on'); worldChip.setAttribute('aria-expanded', 'false');
+  { const a = keepB*Math.PI/180;                              // same bearing and depth, new kinds
+    camX = (HUB_C + keepR*RIM*Math.cos(a)) * PITCH - innerWidth/2; camY = (HUB_R - keepR*RIM*Math.sin(a)) * PITCH - innerHeight/2; clampCam(); }
+  { const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55); const c = nearestCell(wx, wy) || nearestVisibleCell(wx, wy);
+    if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; }
+    else { sel = null; cardEl.classList.add('hidden'); } }                     // nothing on screen: no selection, no stale card, Enter opens nothing
+  updateDriftLabel();
+  hintEl.textContent = WORLDS[key].hint || ('Same wheel, new kinds — the middle is what everyone watches; push out for ' + WORLDS[key].depth[1] + '.');
+  hintEl.style.opacity = '1'; setTimeout(() => { hintEl.style.opacity = '0'; }, 3200);
+}
+const hudEl = document.getElementById('hudlabel'), HUD_STAGED = hudEl ? hudEl.innerHTML : '';
+function renderWorldChrome(){
+  const W = WORLDS[worldKey];
+  worldChip.textContent = W.name + ' ▾';
+  if (hudEl){                                                // the footer is the honesty line: staged, or real with its provenance
+    if (W.placed) hudEl.textContent = `${W.name} · ${W.source === 'youtube' ? 'YouTube' : 'fixture'} · ${W.date} · ${W.items} shorts · ${W.hash.slice(0, 8)}`;
+    else hudEl.innerHTML = HUD_STAGED;
+  }
+  worldStrip.textContent = '';
+  for (const k of WORLD_KEYS){
+    const b = document.createElement('button'); b.textContent = WORLDS[k].name;
+    b.setAttribute('aria-pressed', String(k === worldKey));
+    b.addEventListener('click', () => switchWorld(k));
+    worldStrip.appendChild(b);
+  }
+}
+worldChip.addEventListener('click', () => {
+  const open = !worldStrip.classList.contains('on');
+  worldStrip.classList.toggle('on', open); worldChip.setAttribute('aria-expanded', String(open));
+});
+renderWorldChrome();
+document.getElementById('snd').addEventListener('click', e => {
+  sndOn = !sndOn; e.currentTarget.setAttribute('aria-pressed', String(sndOn));
+});
+document.getElementById('feel').addEventListener('click', () =>
+  document.getElementById('feelcard').classList.toggle('on'));
+addEventListener('resize', () => { sizeCanvas(); sizePuck(); clampCam(); });
+
+function boot(){
+  sizeCanvas(); sizePuck();
+  homeX = (WORLD_W - innerWidth)/2; homeY = (WORLD_H - innerHeight)/2;
+  camX = homeX; camY = homeY; clampCam();
+  const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55);
+  const c = nearestCell(wx, wy);
+  if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; }
+  hintEl.textContent = 'Scrub the dots — or rest a thumb in the ring and push.';
+  updatePulse(); updateDriftLabel(); updateHome();
+}
+boot();
+field.focus();
+// real worlds: any edition the pipeline wrote. Served over http (or bundled in the wrap) — from file:// the fetch
+// fails and the staged worlds stand alone, which is fine and said nowhere loudly.
+if (location.protocol !== 'file:'){                       // file:// cannot fetch a sibling; served or bundled pages can
+  const load = f => fetch('worlds/' + f, { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+    .then(J => { if (J && installWorld(J)) console.info((J.source === 'youtube' ? 'real' : 'fixture') + ' world loaded:', J.name, J.date, J.layoutHash); })
+    .catch(e => console.warn('world file unreadable: worlds/' + f, e && e.message));
+  fetch('worlds/index.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+    .then(M => { const list = M && Array.isArray(M.worlds) ? M.worlds.filter(f => /^[\w.-]+\.json$/.test(f)) : ['shorts.json']; list.forEach(load); })
+    .catch(() => load('shorts.json'));
+}
+</script>
+</body>
+</html>

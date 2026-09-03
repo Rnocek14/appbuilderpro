@@ -1,0 +1,810 @@
+<!-- P13 · the-field — a concept probe, not a product claim.
+     The question: can navigation be *felt*? A day's feed as a bounded field of dots you scrub
+     with a thumb — nearest dot selects with hysteresis, one detent per crossing (haptic where
+     the platform allows, an audible tick everywhere), a preview card bolted above the hand,
+     lift to open, fade on read, edges you can finish.
+     Inevitable when: parking a thumb between two dots never flickers; an edge-to-edge scrub in
+     half a second is an even ratchet; and after a minute you reach for a dot you remember —
+     "the amber ones live lower-left" — instead of searching. Staged data, real timing. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>P13 · The Field</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  /* data hues — relationship tiers; ember stays interaction-only */
+  --tier-close:#D9A441; --tier-follow:#A8B0C2; --tier-new:#5E8FBF;
+  --serif:Charter, Georgia, "Times New Roman", serif;
+  --chrome:-apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono:ui-monospace, "SF Mono", Menlo, monospace;
+  --forge:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overscroll-behavior:none}
+body{background:var(--ground); color:var(--ink); font:14px var(--chrome); overflow:hidden;
+  -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); outline-offset:2px; border-radius:6px}
+::selection{background:var(--ember-soft)}
+
+/* ---------- fixed chrome ---------- */
+.tabs{position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:50%; transform:translateX(-50%);
+  display:flex; gap:6px; z-index:40}
+.tab{font-size:13px; color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 14px}
+.tab.on{color:var(--ink); background:var(--surface); border-color:var(--line)}
+.tab:hover{color:var(--ink)}
+.pulse{position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); right:20px;
+  font:12px var(--mono); font-variant-numeric:tabular-nums; color:var(--dim); z-index:40}
+.cancelhint{position:fixed; top:calc(env(safe-area-inset-top,0px) + 40px); left:50%; transform:translateX(-50%);
+  font:italic 13px var(--serif); color:var(--faint); opacity:0; transition:opacity 120ms; z-index:39; pointer-events:none}
+.cancelhint.on{opacity:1; color:var(--dim)}
+
+/* ---------- the field ---------- */
+#field{position:fixed; inset:0; touch-action:none; cursor:crosshair; z-index:10}
+#field:focus{outline:none}
+#field:focus-visible{outline:none; box-shadow:inset 0 0 0 2px var(--ember-soft)}
+.dot{position:absolute; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%;
+  pointer-events:none; will-change:auto}
+.dot.read{opacity:.26}
+#halo{position:absolute; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%;
+  border:1.5px solid var(--ember); box-shadow:0 0 18px 2px var(--ember-soft), inset 0 0 8px rgba(232,131,58,.18);
+  pointer-events:none; z-index:12}
+#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 52px); transform:translateX(-50%);
+  font:italic 14px var(--serif); color:var(--faint); z-index:20; pointer-events:none;
+  transition:opacity 400ms; white-space:nowrap}
+#donemoment{position:fixed; inset:0; display:none; place-items:center; z-index:30; pointer-events:none}
+#donemoment.on{display:grid}
+#donemoment .inner{text-align:center; font:17px/1.55 var(--serif); color:var(--ink); background:rgba(11,14,20,.82);
+  padding:22px 30px; border:1px solid var(--line); border-radius:12px}
+#donemoment .inner small{display:block; margin-top:6px; font:12px var(--mono); color:var(--faint)}
+
+/* ---------- preview card ---------- */
+#card{position:fixed; left:0; top:0; width:min(88vw,330px); z-index:25; pointer-events:none;
+  background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+  box-shadow:0 10px 40px rgba(0,0,0,.5); transition:opacity 120ms linear}
+#card.docked{left:50%; transform:translateX(-50%)}
+#card.docked .media{display:none}
+#card.hidden{opacity:0}
+#card .media{display:block; width:100%; height:150px; background:var(--surface-2)}
+#card .body{padding:10px 12px 11px}
+#card .who{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--dim)}
+#card .who .tdot{width:8px; height:8px; border-radius:50%; flex:none}
+#card .who b{color:var(--ink); font-weight:500}
+#card .who .age{margin-left:auto; font:11px var(--mono); color:var(--faint)}
+#card .cap{margin-top:6px; font:15px/1.45 var(--serif); color:var(--ink);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-wrap:balance}
+#card.deep .cap{-webkit-line-clamp:4}
+#card .meta{margin-top:7px; display:flex; gap:10px; font:11px var(--mono); color:var(--faint)}
+#card .meta .kind{color:var(--dim)}
+
+/* ---------- post view ---------- */
+#post{position:fixed; inset:0; background:var(--ground); z-index:50; display:none; flex-direction:column}
+#post.on{display:flex}
+#post .top{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px}
+#post .top .tdot{width:9px; height:9px; border-radius:50%}
+#post .top b{font-weight:500}
+#post .top .age{font:11px var(--mono); color:var(--faint)}
+#post .top button{margin-left:auto; width:32px; height:32px; border:1px solid var(--line); border-radius:8px; color:var(--dim)}
+#post .top button:hover{color:var(--ink)}
+#post canvas{display:block; width:100%; flex:none}
+#post .cap{padding:16px 18px; font:17px/1.55 var(--serif); max-width:62ch}
+#post .meta{padding:0 18px 18px; font:12px var(--mono); color:var(--faint); display:flex; gap:14px}
+
+/* ---------- list sibling ---------- */
+#list{position:fixed; inset:0; z-index:15; display:none; overflow-y:auto;
+  padding:calc(env(safe-area-inset-top,0px) + 52px) 14px calc(env(safe-area-inset-bottom,0px) + 52px)}
+#list.on{display:block}
+#list .row{display:flex; align-items:center; gap:10px; width:100%; max-width:560px; margin:0 auto;
+  text-align:left; padding:10px 10px; border-bottom:1px solid var(--line); border-radius:0}
+#list .row .tdot{width:9px; height:9px; border-radius:50%; flex:none}
+#list .row .txt{min-width:0}
+#list .row .txt .l1{font-size:13px; color:var(--dim)} #list .row .txt .l1 b{color:var(--ink); font-weight:500}
+#list .row .txt .l2{font:14px/1.4 var(--serif); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+#list .row .age{margin-left:auto; font:11px var(--mono); color:var(--faint); flex:none}
+#list .row.read{opacity:.4}
+#list .row:hover{background:var(--surface)}
+
+/* ---------- HUD ---------- */
+.hud{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); display:flex; align-items:center; gap:10px;
+  font:11px var(--chrome); color:var(--faint); z-index:45}
+.hud button{border:1px solid var(--line); border-radius:6px; width:22px; height:22px; color:var(--faint)}
+.hud button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+.hud button[aria-pressed="false"]{opacity:.45; text-decoration:line-through}
+.card{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 44px); width:min(88vw,340px); z-index:46;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+  display:none}
+.card.on{display:block}
+.card h4{font:500 13px var(--chrome); margin-bottom:8px}
+.card ul{margin-left:16px; display:grid; gap:6px; font-size:12.5px; color:var(--dim); line-height:1.45}
+.card .leg{display:flex; gap:12px; margin-top:10px; font-size:11px; color:var(--faint)}
+.card .leg span{display:inline-flex; align-items:center; gap:5px}
+.card .leg i{width:8px; height:8px; border-radius:50%; display:inline-block}
+
+.keys{position:fixed; right:20px; bottom:calc(env(safe-area-inset-bottom,0px) + 14px); font:11px var(--chrome);
+  color:var(--faint); z-index:45}
+@media (hover:none){.keys{display:none}}
+
+.hapchip{position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(env(safe-area-inset-bottom,0px) + 82px); z-index:41;
+  font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
+  border-radius:999px; padding:4px 12px; transition:opacity 600ms; white-space:nowrap; max-width:94vw;
+  overflow:hidden; text-overflow:ellipsis}
+.hapchip:empty{display:none}
+.hapchip a{color:var(--ember); text-decoration:none}
+.card .haprow{margin-top:10px; display:flex; align-items:center; gap:8px; font:11px var(--mono); color:var(--faint)}
+.card .haprow button{border:1px solid var(--line); border-radius:6px; padding:2px 8px; color:var(--dim); width:auto; height:auto}
+.card .haprow button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body>
+
+<div class="tabs" role="tablist" aria-label="View">
+  <button class="tab on" id="tabField" role="tab" aria-selected="true">Field</button>
+  <button class="tab" id="tabList" role="tab" aria-selected="false">List</button>
+</div>
+<div class="pulse" id="pulse"></div>
+<div class="cancelhint" id="cancelhint">release here to cancel</div>
+
+<div id="field" tabindex="0" role="listbox" aria-label="Today's field — arrow keys move, Enter opens"></div>
+<div id="hint"></div>
+<div id="donemoment"><div class="inner" id="doneinner"></div></div>
+
+<div id="card" class="docked" aria-hidden="true">
+  <canvas class="media" id="cmedia" width="330" height="150"></canvas>
+  <div class="body">
+    <div class="who"><span class="tdot" id="ctdot"></span><b id="cauthor"></b><span id="chandle"></span><span class="age" id="cage"></span></div>
+    <div class="cap" id="ccap"></div>
+    <div class="meta"><span class="kind" id="ckind"></span><span id="clikes"></span></div>
+  </div>
+</div>
+
+<div id="post" role="dialog" aria-modal="true" aria-label="Post">
+  <div class="top"><span class="tdot" id="ptdot"></span><b id="pauthor"></b><span class="age" id="page"></span>
+    <button id="pclose" aria-label="Close post">✕</button></div>
+  <canvas id="pmedia" width="800" height="620"></canvas>
+  <div class="cap" id="pcap"></div>
+  <div class="meta" id="pmeta"></div>
+</div>
+
+<div id="list" aria-label="Today as a list"></div>
+
+<div class="keys">arrows move · Enter opens · Esc closes</div>
+<div class="hud">
+  <span>P13 · the field — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="snd" aria-label="Tick sound" aria-pressed="true">♪</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Park your thumb <em>between</em> two dots. The selection must hold — no flicker, no buzz.</li>
+    <li>Scrub edge-to-edge in half a second: an even ratchet, the halo within one dot of your finger, the card readable the instant you stop.</li>
+    <li>One tap per crossing, never two for the same dot, never a hum.</li>
+    <li>Rest on a dot: the card deepens. Lift: it opens. Lift mid-flick: nothing opens.</li>
+    <li>Watch the field fade as you go — the day is finishable, and you can see how much is left.</li>
+    <li>After a minute, reach for a dot you <em>remember</em>. That reach is the whole idea.</li>
+  </ul>
+  <div class="leg">
+    <span><i style="background:var(--tier-close)"></i>close</span>
+    <span><i style="background:var(--tier-follow)"></i>following</span>
+    <span><i style="background:var(--tier-new)"></i>new to you</span>
+  </div>
+  <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
+</div>
+<div class="hapchip" id="hapchip"></div>
+
+<div class="sr" aria-live="polite" id="live"></div>
+
+<script>
+'use strict';
+/* ===================== staged data — one source of truth =====================================
+   A day's feed. Everything on screen derives from POSTS; the field size derives from the
+   viewport (a bounded session: the field holds exactly what fits at 44px pitch). Fixed seed —
+   the geography must be identical on every open, or spatial memory has nothing to grip.     */
+const SEED = 1187;
+function rng(seed){ let s = seed>>>0; return () => (s = (s*1664525 + 1013904223)>>>0, s/4294967296); }
+
+const AUTHORS = [
+  ['Mara Quist','@maraquist','close'], ['Dee Okafor','@deeo','close'], ['Sam Aldana','@samald','close'],
+  ['Ruthie Vance','@ruthiev','close'], ['Cole Brandt','@colebr','close'], ['Priya Nair','@priyanair','close'],
+  ['Lake Geneva Runners','@lgrunners','follow'], ['Harbor Bakehouse','@harborbake','follow'],
+  ['Jon Petras','@jonpetras','follow'], ['Field Notes WI','@fieldnoteswi','follow'],
+  ['Anna Marsh','@annamarsh','follow'], ['Delavan Camera Club','@delavancam','follow'],
+  ['Theo Lindt','@theolindt','follow'], ['Badger Trail Assoc','@badgertrails','follow'],
+  ['Kettle Moraine Sky','@kmsky','follow'], ['Walworth Makers','@walworthmakers','follow'],
+  ['June Halloran','@junehall','follow'], ['Otto Reyes','@ottoreyes','follow'],
+  ['Prairie Loom Studio','@prairieloom','new'], ['Nightjar Coffee','@nightjarco','new'],
+  ['Wren Adler','@wrenadler','new'], ['Driftless Ceramics','@driftlessclay','new'],
+  ['Marsh Light Sound','@marshlight','new'], ['Ida Kovac','@idakovac','new'],
+  ['The Slow Ferment','@slowferment','new'], ['Pinecliff Climbing','@pinecliff','new'],
+];
+const CAPTIONS = [
+  'Fog on the lake until nine, then this.',
+  'Third attempt at the sourdough crumb and I finally believe the hype.',
+  'The heron was back this morning. Same rock, same attitude.',
+  'We got the kiln to temperature. Everything else today is a bonus.',
+  'Saturday long run, 14 miles, one gas station donut earned.',
+  'New batch of walnut boards milled. The grain on the fourth one, though.',
+  'Storm rolled through at six — the light after was unreal.',
+  'Practice room, hour three. The bridge finally sounds like a bridge.',
+  'First tomato of the year. It weighs almost nothing and it is everything.',
+  'Painted the studio floor. Regret nothing yet.',
+  'The trail crew finished the boardwalk over the marsh. Go before it gets loud.',
+  'A very serious meeting about who gets the sunny chair.',
+  'Espresso experiments continue. This one tasted like a plum, no notes.',
+  'Sketchbook page 100. Started this thing in February.',
+  'Found the negatives from the 2019 ice storm. Printing a few tonight.',
+  'The choir learned the hard passage. It only took a season.',
+  'Low tide of the year at the quarry — you can walk the whole ledge.',
+  'Wheel-thrown, once-fired, still warm.',
+  'Night sky over the kettle. No edits, just cold hands.',
+  'The market opens at seven. The good rhubarb is gone by eight.',
+  'Rebuilt the front hub. The bike is now 60% new parts, same soul.',
+  'Reading porch season has officially begun.',
+  'The mural on Main got its last coat today.',
+  'Six-string Saturday. The dog remains the only audience that matters.',
+  'A whole hour of sun in the print shop and I used it on this.',
+  'The ferns took over the north wall and honestly, let them.',
+  'Ice out on the lake. Spring is now legally allowed.',
+  'The apprentice pulled her first perfect shot today. Proud is the word.',
+  'Barn swallows are back in the eaves, loud and on schedule.',
+  'Two colors, one screen, forty prints. My arms know about it.',
+  'The dough knows when you rush it. Today I did not rush it.',
+  'Found a 1962 topo map of the county at the estate sale.',
+  'The last mile of the ridge trail at golden hour.',
+  'New strings, old songs.',
+  'We put the canoe in before work. Ten minutes of glass water.',
+  'The bees made it through winter. All three hives.',
+];
+const KINDS = ['photo','photo','photo','photo','photo','photo','reel','reel','reel','carousel','carousel'];
+
+function makePosts(count){
+  const r = rng(SEED), posts = [];
+  for (let i = 0; i < count; i++){
+    const a = AUTHORS[Math.floor(r()*AUTHORS.length)];
+    const kind = KINDS[Math.floor(r()*KINDS.length)];
+    posts.push({
+      id:i, author:a[0], handle:a[1], tier:a[2], kind,
+      mins: Math.round(4 + i*(820/count) + r()*10),          // newest first, spread over ~14h
+      cap: CAPTIONS[(i*7 + Math.floor(r()*3)) % CAPTIONS.length],
+      dur: kind==='reel' ? 18 + Math.floor(r()*78) : 0,
+      frames: kind==='carousel' ? 2 + Math.floor(r()*5) : 1,
+      likes: 3 + Math.floor(r()*140),
+      art: Math.floor(r()*1e6),
+      read:false,
+    });
+  }
+  return posts;
+}
+
+/* ===================== field geometry — static centres, cached ============================== */
+const field = document.getElementById('field');
+const PITCH = 44, JITTER = 4;
+let POSTS = [], centres = null, cols = 0, rows = 0, dotEls = [];
+let fieldTop = 0, fieldBottom = 0;
+
+function layout(){
+  const W = innerWidth, H = innerHeight;
+  const safeT = 0, chromeTop = 64, dockH = 104, chromeBot = 62;
+  fieldTop = safeT + chromeTop + dockH; fieldBottom = H - chromeBot;
+  cols = Math.max(4, Math.floor((W - 16) / PITCH));
+  rows = Math.max(6, Math.floor((fieldBottom - fieldTop) / PITCH));
+  const count = Math.min(160, cols * rows);
+  if (POSTS.length !== count){
+    const readIds = new Set(POSTS.filter(p=>p.read).map(p=>p.id));
+    POSTS = makePosts(count);
+    POSTS.forEach(p => { p.read = readIds.has(p.id); });
+  }
+  const offX = (W - cols*PITCH)/2 + PITCH/2;
+  const offY = fieldTop + ((fieldBottom - fieldTop) - rows*PITCH)/2 + PITCH/2;
+  centres = new Float32Array(count*2);
+  const jr = rng(SEED ^ 0x9e37);
+  field.querySelectorAll('.dot').forEach(el=>el.remove());
+  dotEls = [];
+  for (let i = 0; i < count; i++){
+    const c = i % cols, rw = Math.floor(i / cols);
+    const x = offX + c*PITCH + (jr()*2-1)*JITTER;
+    const y = offY + rw*PITCH + (jr()*2-1)*JITTER;
+    centres[i*2] = x; centres[i*2+1] = y;
+    const el = document.createElement('div');
+    el.className = 'dot' + (POSTS[i].read ? ' read' : '');
+    el.id = 'dot'+i; el.setAttribute('role','option');
+    el.setAttribute('aria-label', POSTS[i].author + ': ' + POSTS[i].cap);
+    el.style.left = x+'px'; el.style.top = y+'px';
+    el.style.background = tierColor(POSTS[i].tier);
+    field.appendChild(el);
+    dotEls.push(el);
+  }
+  if (!field.querySelector('#halo')){
+    const h = document.createElement('div'); h.id = 'halo'; field.appendChild(h);
+  }
+  buildList(); updatePulse();
+}
+function tierColor(t){ return t==='close' ? 'var(--tier-close)' : t==='follow' ? 'var(--tier-follow)' : 'var(--tier-new)'; }
+
+/* nearest-centre over a 3×3 bucket neighbourhood — the hot path reads nothing from the DOM */
+function nearest(x, y){
+  let best = -1, bd = Infinity;
+  const c0 = Math.max(0, Math.floor((x - centres[0] + PITCH/2)/PITCH) - 1);
+  for (let rw = 0; rw < rows; rw++){
+    const cy = centres[(rw*cols)*2+1];
+    if (Math.abs(cy - y) > PITCH*1.6) continue;
+    for (let c = c0; c < Math.min(cols, c0+3); c++){
+      const i = rw*cols + c; if (i >= POSTS.length) break;
+      const dx = centres[i*2]-x, dy = centres[i*2+1]-y, d = dx*dx+dy*dy;
+      if (d < bd){ bd = d; best = i; }
+    }
+  }
+  return [best, Math.sqrt(bd)];
+}
+
+/* ===================== selection: hysteresis + detents ====================================== */
+let sel = -1, lastDeselAt = new Map(), lastTickAt = 0;
+const HYST = 0.80, HYST_REENTRY = 0.70, REENTRY_MS = 50;
+
+function trySelect(x, y, now){
+  const [cand, cd] = nearest(x, y);
+  if (cand === -1 || cand === sel) return;
+  if (sel !== -1){
+    const dx = centres[sel*2]-x, dy = centres[sel*2+1]-y;
+    const curd = Math.sqrt(dx*dx+dy*dy);
+    const th = (now - (lastDeselAt.get(cand)||-1e9)) < REENTRY_MS ? HYST_REENTRY : HYST;
+    if (!(cd < curd * th)) return;                    // incumbent wins ties — no boundary buzz
+    lastDeselAt.set(sel, now);
+  }
+  setSelection(cand, now, true);
+}
+
+function setSelection(i, now, tick){
+  if (sel === i) return;
+  const prev = sel; sel = i;
+  if (tick) detent(now);
+  swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;  // scale pulse per crossing
+  if (prev !== -1) relaxSet.add(prev);
+  cardContent(POSTS[i]);
+  dwellStart = now;
+  field.setAttribute('aria-activedescendant', 'dot'+i);
+  announce(POSTS[i]);
+}
+
+/* detents: fire synchronously on the crossing, ≥30ms gap, skip never queue */
+let sndOn = true, audioCtx = null, tickBuf = null;
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canVibe = 'vibrate' in navigator;
+function detent(now){
+  const gap = speed > 1200 ? 40 : 30;
+  if (now - lastTickAt < gap) return;
+  lastTickAt = now;
+  if (canVibe) navigator.vibrate(12);
+  // iOS web has no carrier since iOS 26.5 patched the switch trick — the tick is sound there
+  if (sndOn && audioCtx && tickBuf){
+    const s = audioCtx.createBufferSource(); s.buffer = tickBuf;
+    s.playbackRate.value = 0.97 + Math.random()*0.06;
+    const g = audioCtx.createGain(); g.gain.value = 0.12;
+    s.connect(g); g.connect(audioCtx.destination); s.start();
+  }
+}
+function initAudio(){
+  if (audioCtx) return;
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const sr = audioCtx.sampleRate, n = Math.floor(sr*0.006), b = audioCtx.createBuffer(1, n, sr);
+    const ch = b.getChannelData(0);
+    for (let i = 0; i < n; i++){
+      const t = i/sr;
+      ch[i] = (Math.sin(2*Math.PI*1900*t)*0.7 + (Math.random()*2-1)*0.3) * Math.exp(-t*900);
+    }
+    tickBuf = b;
+  }catch(e){ audioCtx = null; }
+}
+
+/* ===================== springs ============================================================= */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function spring(k, c){ return {value:0, v:0, target:0, k, c}; }
+function step(s, dt, kMul){
+  if (reduceMotion){ s.value = s.target; s.v = 0; return; }
+  const k = s.k * (kMul||1);
+  // substep: explicit Euler at k≈2700 diverges past dt≈8ms, and a dropped frame hands us 32ms
+  const n = Math.max(1, Math.ceil(dt/0.008)), h = dt/n;
+  for (let i = 0; i < n; i++){
+    const a = -k*(s.value - s.target) - s.c*s.v;
+    s.v += a*h; s.value += s.v*h;
+  }
+}
+const hx = spring(900, 60), hy = spring(900, 60);   // halo position — critically damped
+const swell = spring(550, 30);                      // selected-dot scale — one micro-overshoot
+swell.value = 1; swell.target = 1;
+const relaxSet = new Set();                         // dots easing back from swell/displacement
+const dispNow = new Map();                          // dot → {dx,dy} decorative displacement
+
+/* ===================== pointer engine ====================================================== */
+let touching = false, hovering = false, px = 0, py = 0, speed = 0;
+let samples = [], dwellStart = 0, inCancel = false, firstTouch = true;
+const cardEl = document.getElementById('card'), hintEl = document.getElementById('hint');
+const cancelhint = document.getElementById('cancelhint');
+let cardBelow = false, cardHiddenAt = 0, cardShownAt = 0;
+
+function vel(now, x, y){
+  samples.push([now, x, y]);
+  while (samples.length > 2 && now - samples[0][0] > 60) samples.shift();
+  const a = samples[0], dt = (now - a[0])/1000;
+  speed = dt > 0.004 ? Math.hypot(x - a[1], y - a[2])/dt : 0;
+}
+
+field.addEventListener('pointerdown', e => {
+  if (listOn || postOn) return;
+  e.preventDefault();
+  field.setPointerCapture(e.pointerId);
+  touching = true; hovering = false; samples = []; inCancel = false;
+  initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (canVibe) navigator.vibrate(5);              // activation primer — the first tap of the session
+  px = e.clientX; py = e.clientY;
+  const now = performance.now();
+  vel(now, px, py);
+  trySelect(px, py, now);
+  if (sel === -1){ const [i] = nearest(px, py); if (i !== -1) setSelection(i, now, true); }
+  cardEl.classList.remove('docked');
+  if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
+});
+field.addEventListener('pointermove', e => {
+  if (postOn || listOn) return;
+  const now = performance.now();
+  if (touching){
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of evs){ vel(now, ev.clientX, ev.clientY); trySelect(ev.clientX, ev.clientY, now); }
+    px = e.clientX; py = e.clientY;
+    const cancel = py < fieldTop;
+    if (cancel !== inCancel){ inCancel = cancel; cancelhint.classList.toggle('on', cancel); }
+  } else if (matchMedia('(hover:hover) and (pointer:fine)').matches){
+    hovering = true; px = e.clientX; py = e.clientY;
+    vel(now, px, py); trySelect(px, py, now);
+    cardEl.classList.remove('docked');
+  }
+});
+function endTouch(e, open){
+  if (!touching) return;
+  touching = false;
+  cancelhint.classList.remove('on');
+  const now = performance.now();
+  if (open && !inCancel && speed < 1000 && sel !== -1){
+    // velocity-projected commit: honor the dot the finger was decelerating toward
+    const a = samples[0], dt = (now - a[0])/1000;
+    let lx = px, ly = py;
+    if (dt > 0.004){ lx += (px - a[1])/dt*0.06; ly += (py - a[2])/dt*0.06; }
+    const [proj] = nearest(lx, ly);
+    if (proj !== -1 && proj !== sel) setSelection(proj, now, false);
+    openPost(sel);
+  }
+  inCancel = false;
+  cardEl.classList.add('docked');
+}
+field.addEventListener('pointerup', e => endTouch(e, true));
+field.addEventListener('pointercancel', e => endTouch(e, false));
+field.addEventListener('pointerleave', () => { hovering = false; cardEl.classList.add('docked'); });
+
+/* ===================== the one rAF loop — transforms and opacity only ======================= */
+let lastT = 0, haloEl = null;
+function frame(t){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.032, (t - lastT)/1000 || 0.016); lastT = t;
+  if (!centres || sel === -1) return;
+
+  const tx = centres[sel*2], ty = centres[sel*2+1];
+  hx.target = tx; hy.target = ty;
+  const sep = Math.hypot(hx.value - tx, hy.value - ty);
+  const kMul = Math.min(3, Math.max(1, sep/35));      // halo never trails more than ~0.8×pitch
+  step(hx, dt, kMul); step(hy, dt, kMul);
+  step(swell, dt);
+
+  if (!haloEl) haloEl = document.getElementById('halo');
+  const active = touching || hovering;
+  haloEl.style.transform = `translate(${hx.value}px, ${hy.value}px) scale(${0.9 + 0.2*swell.value})`;
+  haloEl.style.opacity = active ? 1 : 0.65;
+
+  // selected dot swell + neighbour sheet
+  const selEl = dotEls[sel];
+  if (selEl) selEl.style.transform = `scale(${1 + 0.6*swell.value})`;
+  const R = PITCH*2.05;
+  for (let rw = 0; rw < rows; rw++){
+    const cy = centres[(rw*cols)*2+1];
+    if (Math.abs(cy - ty) > R) continue;
+    for (let c = 0; c < cols; c++){
+      const i = rw*cols + c; if (i >= POSTS.length) break;
+      if (i === sel) continue;
+      const dx = centres[i*2]-tx, dy = centres[i*2+1]-ty, d = Math.hypot(dx,dy);
+      if (d > R || d === 0) continue;
+      const g = Math.exp(-(d*d)/(2*PITCH*PITCH)) * 6 * (reduceMotion?0:swell.value);
+      dispNow.set(i, {dx: dx/d*g, dy: dy/d*g});
+      relaxSet.add(i);
+    }
+  }
+  for (const i of relaxSet){
+    const cur = dispNow.get(i) || {dx:0, dy:0};
+    const isNeighbour = Math.hypot(centres[i*2]-tx, centres[i*2+1]-ty) <= R && i !== sel;
+    const k = 0.35;
+    const nx = isNeighbour ? cur.dx : cur.dx*(1-k), ny = isNeighbour ? cur.dy : cur.dy*(1-k);
+    dotEls[i].style.transform = `translate(${nx}px, ${ny}px)`;
+    if (!isNeighbour){
+      if (Math.abs(nx) < 0.1 && Math.abs(ny) < 0.1){ dotEls[i].style.transform = ''; relaxSet.delete(i); dispNow.delete(i); }
+      else dispNow.set(i, {dx:nx, dy:ny});
+    } else dispNow.set(i, {dx:nx, dy:ny});
+  }
+  positionCard(active);
+}
+requestAnimationFrame(frame);
+
+/* card geometry: bolted above the hand, raw x-follow, eased flip, hidden at flick speed.
+   Analytic size — the hot path may not read layout. */
+let flipOff = null;
+function positionCard(active){
+  if (!active){
+    cardEl.style.transform = '';
+    cardEl.style.left = ''; cardEl.style.top = '68px';
+    cardEl.classList.remove('hidden');
+    cardEl.classList.remove('deep');
+    flipOff = null;
+    return;
+  }
+  const w = Math.min(innerWidth*0.88, 330);
+  const h = cardEl.classList.contains('deep') ? 300 : 262;
+  const x = Math.min(innerWidth - w - 12, Math.max(12, px - w/2));
+  if (!cardBelow && py - 90 - h < 24) cardBelow = true;
+  else if (cardBelow && py - 90 - h > 64) cardBelow = false;
+  const targetOff = cardBelow ? 90 : -90 - h;         // flip eases; x stays bolted to the finger
+  if (flipOff === null || reduceMotion) flipOff = targetOff;
+  else flipOff += (targetOff - flipOff) * 0.35;
+  const y = Math.min(innerHeight - h - 8, Math.max(4, py + flipOff));
+  cardEl.classList.remove('docked');
+  cardEl.style.left = '0px'; cardEl.style.top = '0px';
+  cardEl.style.transform = `translate(${x}px, ${y}px)`;
+  const now = performance.now();
+  if (speed > 1500){ cardEl.classList.add('hidden'); cardHiddenAt = now; }
+  else if (cardEl.classList.contains('hidden') && now - cardHiddenAt > 80 && speed < 900) cardEl.classList.remove('hidden');
+  cardEl.classList.toggle('deep', now - dwellStart > 1200);
+}
+
+/* ===================== preview content — pre-rendered, hard swaps =========================== */
+const mediaCache = new Map();
+function art(post, w, h){
+  const key = post.id + 'x' + w;
+  if (mediaCache.has(key)) return mediaCache.get(key);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d'), r = rng(post.art);
+  const hues = {close:[36,28], follow:[218,14], new:[210,30]}[post.tier];
+  const h1 = hues[0] + r()*24 - 12;
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, `hsl(${h1} ${hues[1]+18}% ${16 + r()*10}%)`);
+  g.addColorStop(1, `hsl(${h1 + 30} ${hues[1]}% ${7 + r()*6}%)`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  const disc = r();
+  if (disc > 0.45){
+    ctx.beginPath();
+    ctx.arc(w*(0.2 + r()*0.6), h*(0.18 + r()*0.3), 8 + r()*h*0.09, 0, 7);
+    ctx.fillStyle = `hsla(${h1+10} 60% 78% / ${0.25 + r()*0.4})`; ctx.fill();
+  }
+  for (let l = 0; l < 3; l++){                       // ridge lines, the house line-art
+    ctx.beginPath();
+    let y = h*(0.45 + l*0.16 + r()*0.06); ctx.moveTo(-4, y);
+    for (let x = 0; x <= w; x += w/14){ y += (r()*2-1)*h*0.07; y = Math.min(h-4, Math.max(h*0.3, y)); ctx.lineTo(x, y); }
+    ctx.lineTo(w+4, h+4); ctx.lineTo(-4, h+4); ctx.closePath();
+    ctx.fillStyle = `hsla(${h1 + 24 + l*10} ${hues[1]+6}% ${10 - l*2}% / ${0.75})`;
+    ctx.fill();
+  }
+  if (post.kind === 'reel'){
+    ctx.fillStyle = 'rgba(232,228,218,.85)';
+    ctx.beginPath(); const cx = w-26, cy = 22;
+    ctx.moveTo(cx-5, cy-7); ctx.lineTo(cx+7, cy); ctx.lineTo(cx-5, cy+7); ctx.closePath(); ctx.fill();
+  }
+  if (post.kind === 'carousel'){
+    ctx.strokeStyle = 'rgba(232,228,218,.7)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(w-34, 12, 16, 12); ctx.strokeRect(w-30, 16, 16, 12);
+  }
+  mediaCache.set(key, cv);
+  return cv;
+}
+const cm = document.getElementById('cmedia'), cmx = cm.getContext('2d');
+function ageStr(m){ return m < 60 ? m + 'm' : Math.round(m/60) + 'h'; }
+function kindStr(p){
+  return p.kind === 'reel' ? `reel · ${Math.floor(p.dur/60)}:${String(p.dur%60).padStart(2,'0')}`
+       : p.kind === 'carousel' ? `carousel · ${p.frames} frames` : 'photo';
+}
+function cardContent(p){
+  cmx.drawImage(art(p, 330, 150), 0, 0);
+  document.getElementById('ctdot').style.background = tierColor(p.tier);
+  document.getElementById('cauthor').textContent = p.author;
+  document.getElementById('chandle').textContent = p.handle;
+  document.getElementById('cage').textContent = ageStr(p.mins);
+  document.getElementById('ccap').textContent = p.cap;
+  document.getElementById('ckind').textContent = kindStr(p);
+  document.getElementById('clikes').textContent = p.likes + ' likes';
+}
+let announceTimer = 0;
+function announce(p){
+  clearTimeout(announceTimer);
+  announceTimer = setTimeout(() => {
+    document.getElementById('live').textContent = p.author + '. ' + p.cap;
+  }, 500);
+}
+
+/* ===================== post view =========================================================== */
+let postOn = false;
+const postEl = document.getElementById('post');
+function openPost(i){
+  const p = POSTS[i]; postOn = true;
+  const pm = document.getElementById('pmedia');
+  pm.height = Math.round(Math.min(innerHeight*0.55, innerWidth*0.78));
+  pm.width = innerWidth;
+  pm.getContext('2d').drawImage(art(p, innerWidth, pm.height), 0, 0);
+  document.getElementById('ptdot').style.background = tierColor(p.tier);
+  document.getElementById('pauthor').textContent = p.author + '  ' + p.handle;
+  document.getElementById('page').textContent = ageStr(p.mins);
+  document.getElementById('pcap').textContent = p.cap;
+  document.getElementById('pmeta').textContent = kindStr(p) + ' · ' + p.likes + ' likes';
+  postEl.classList.add('on');
+  document.getElementById('pclose').focus();
+  markRead(i);
+}
+function closePost(){
+  postOn = false; postEl.classList.remove('on');
+  cardEl.classList.add('docked');
+  field.focus();
+}
+document.getElementById('pclose').addEventListener('click', closePost);
+function markRead(i){
+  const p = POSTS[i];
+  if (!p.read){ p.read = true; dotEls[i].classList.add('read'); updatePulse(); refreshListRow(i); }
+  if (POSTS.every(q => q.read)) doneMoment();
+}
+function updatePulse(){
+  const felt = POSTS.filter(p => p.read).length;
+  document.getElementById('pulse').textContent = felt + ' / ' + POSTS.length + ' felt';
+}
+function doneMoment(){
+  document.getElementById('doneinner').innerHTML =
+    'That’s today. ' + POSTS.length + ' posts, all felt.<small>the field refills tomorrow · ⟲ to re-run</small>';
+  document.getElementById('donemoment').classList.add('on');
+  setTimeout(() => document.getElementById('donemoment').classList.remove('on'), 4200);
+}
+
+/* dwell counts as reading: resting ≥1.2s on an unread dot fades it — previews are consumption */
+setInterval(() => {
+  if ((touching || hovering) && sel !== -1 && performance.now() - dwellStart > 1200) markRead(sel);
+}, 300);
+
+/* ===================== keyboard path ======================================================= */
+field.addEventListener('keydown', e => {
+  if (postOn) return;
+  const k = e.key;
+  let d = 0;
+  if (k === 'ArrowRight') d = 1; else if (k === 'ArrowLeft') d = -1;
+  else if (k === 'ArrowDown') d = cols; else if (k === 'ArrowUp') d = -cols;
+  else if (k === 'Enter' && sel !== -1){ e.preventDefault(); openPost(sel); return; }
+  else return;
+  e.preventDefault();
+  const n = sel === -1 ? 0 : Math.min(POSTS.length-1, Math.max(0, sel + d));
+  setSelection(n, performance.now(), true);
+  field.setAttribute('aria-activedescendant', 'dot'+n);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape'){
+    if (postOn) closePost();
+    else document.getElementById('feelcard').classList.remove('on');
+  }
+});
+
+/* ===================== list sibling — same day, first-class ================================ */
+let listOn = false;
+const listEl = document.getElementById('list');
+function buildList(){
+  listEl.textContent = '';
+  POSTS.forEach((p, i) => {
+    const b = document.createElement('button');
+    b.className = 'row' + (p.read ? ' read' : ''); b.id = 'row'+i;
+    b.innerHTML = `<span class="tdot" style="background:${tierColor(p.tier)}"></span>
+      <span class="txt"><span class="l1"><b></b> <span class="hnd"></span></span><span class="l2"></span></span>
+      <span class="age"></span>`;
+    b.querySelector('b').textContent = p.author;
+    b.querySelector('.hnd').textContent = p.handle;
+    b.querySelector('.l2').textContent = p.cap;
+    b.querySelector('.age').textContent = ageStr(p.mins);
+    b.addEventListener('click', () => { setSelection(i, performance.now(), false); openPost(i); });
+    listEl.appendChild(b);
+  });
+}
+function refreshListRow(i){ const r = document.getElementById('row'+i); if (r) r.classList.add('read'); }
+function setView(list){
+  listOn = list;
+  listEl.classList.toggle('on', list);
+  field.style.display = list ? 'none' : '';
+  cardEl.style.display = list ? 'none' : '';
+  hintEl.style.display = list ? 'none' : '';
+  document.getElementById('tabField').classList.toggle('on', !list);
+  document.getElementById('tabList').classList.toggle('on', list);
+  document.getElementById('tabField').setAttribute('aria-selected', String(!list));
+  document.getElementById('tabList').setAttribute('aria-selected', String(list));
+  if (!list) field.focus();
+}
+document.getElementById('tabField').addEventListener('click', () => setView(false));
+document.getElementById('tabList').addEventListener('click', () => setView(true));
+
+/* ===================== HUD ================================================================= */
+document.getElementById('restart').addEventListener('click', () => {
+  POSTS.forEach((p, i) => { p.read = false; dotEls[i] && dotEls[i].classList.remove('read'); });
+  buildList(); updatePulse();
+  document.getElementById('donemoment').classList.remove('on');
+});
+document.getElementById('snd').addEventListener('click', e => {
+  sndOn = !sndOn; e.currentTarget.setAttribute('aria-pressed', String(sndOn));
+});
+document.getElementById('feel').addEventListener('click', () =>
+  document.getElementById('feelcard').classList.toggle('on'));
+
+/* haptics honesty: say what THIS device/context can do, and how to unlock more */
+const hapchip = document.getElementById('hapchip');
+const embedded = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+(function setupHapchip(){
+  if (canVibe && embedded){
+    hapchip.textContent = 'ticks are muted in embedded previews — ';
+    const a = document.createElement('a');
+    a.href = location.href; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'open full screen for haptics ↗';
+    hapchip.appendChild(a);
+  } else if (!canVibe && isIOS){
+    hapchip.textContent = 'iPhone Safari has no web vibration — sound on, the ticks carry it';
+  } else hapchip.textContent = '';
+})();
+function fadeHapchipSoon(){ setTimeout(() => { hapchip.style.opacity = '0'; }, 6000); }
+document.getElementById('haptest').addEventListener('click', () => {
+  const out = document.getElementById('hapresult');
+  if (canVibe){
+    const ok = navigator.vibrate(120);
+    out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
+  } else if (isIOS){
+    out.textContent = 'no web vibration on iPhone — ringer on, the tick carries it; the detent lives in the wrap';
+  } else out.textContent = 'no vibration API in this browser';
+});
+
+/* ===================== boot ================================================================ */
+let resizeT = 0;
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { layout(); reselect(); }, 150); });
+function reselect(){
+  const keep = Math.min(sel === -1 ? 0 : sel, POSTS.length - 1);
+  sel = -1;
+  setSelection(keep, performance.now(), false);
+  hx.value = hx.target = centres[sel*2]; hy.value = hy.target = centres[sel*2+1];
+}
+function firstCloseUnread(){
+  const i = POSTS.findIndex(p => p.tier === 'close' && !p.read);
+  return i === -1 ? 0 : i;
+}
+layout();
+hintEl.textContent = 'Put a thumb down anywhere — slide, feel, lift to open.';
+setSelection(firstCloseUnread(), performance.now(), false);
+hx.value = centres[sel*2]; hy.value = centres[sel*2+1];
+hx.target = hx.value; hy.target = hy.value;
+updatePulse();
+// pre-render every card before the first touch: previews must never wait on anything
+const idle = window.requestIdleCallback ? (fn => requestIdleCallback(fn)) : (fn => setTimeout(fn, 0));
+(function warm(i){
+  if (i >= POSTS.length) return;
+  art(POSTS[i], 330, 150);
+  idle(() => warm(i+1));
+})(0);
+field.focus();
+</script>
+</body>
+</html>
