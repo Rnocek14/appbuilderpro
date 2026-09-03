@@ -180,6 +180,8 @@
     "verify:worldplacement": "tsx src/lib/worldPlacement.verify.ts",
     "verify:shortsworld": "tsx src/lib/shortsWorld.verify.ts",
     "drop:shorts": "tsx scripts/shorts-drop.ts",
+    "serve:drift": "node scripts/serve-drift.mjs",
+    "pack:drift": "node scripts/pack-drift.mjs",
     "probe:generated": "tsx scripts/generated-app-probe.mjs --fixtures",
     "verify:selfinteraction": "tsx scripts/self-interaction-lint.mjs",
     "verify:cohortstats": "tsx src/lib/garvis/prospects/cohortStats.verify.ts",

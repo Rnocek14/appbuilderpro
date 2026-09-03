@@ -133,6 +133,24 @@ suite, served over a local http server): the fixture world loads and joins the s
 cell's region matches its item's; opening a dot shows the fixture wording and no player; closing
 clears the player; the W-cycle includes `shorts`; every earlier check (rev. 2–5) still passes.
 
+## 5b. Where the full experience runs
+
+The private artifact's host blocks every image and frame from YouTube, so there the card shows
+inlined thumbnails and a title links out; the player and the dwell preview cannot run. Three ways to
+run the real thing, all private:
+
+- **Two minutes, your own phone.** `npm run serve:drift` on a computer, then open the printed
+  `http://<your-ip>:4173/the-drift.html` on a phone on the same Wi-Fi. Real thumbnails, YouTube's
+  player on open, the muted dwell preview. LAN only, nothing public.
+- **This week, for testers.** `.github/workflows/drift-deploy.yml` runs the daily drop, packs the drift
+  (`npm run pack:drift` → `dist-drift/`) and deploys it to Cloudflare Pages, all on free tiers, once
+  three repository secrets exist (the YouTube key and two Cloudflare values; the workflow header has the
+  four set-up steps). Put the deployment behind **Cloudflare Access** so only listed emails can open it:
+  a public URL is a public disclosure, and Europe has no grace period. Without the secrets the workflow
+  still runs the drop gates and keeps the packed folder as a build artifact.
+- **The native wrap, for the haptics.** `scout/` on a Mac with Xcode, per `scout/README.md`. The only
+  way to feel the tick on an iPhone, and the plan's Gate A.
+
 ## 6. Terms and risks — read before any public ship
 
 - **YouTube API Services Terms** (UNVERIFIED reading): use the official player, never download or
