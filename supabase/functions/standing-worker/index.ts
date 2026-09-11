@@ -1392,7 +1392,10 @@ Deno.serve(async (req) => {
         }).eq('id', order.id).then(() => {}, () => {});
         continue;
       }
-      const before: HuntDayState = dayStateFor((order.config as Record<string, unknown> | null)?.dayState, nowIso);
+      // The budget period is the order's cadence window (anchor-relative), not the UTC date — a
+      // daily order anchored at 20:00 must not get a second quota at midnight.
+      const periodKey = nextRunAfter(order.cadence, order.anchor_at, nowIso);
+      const before: HuntDayState = dayStateFor((order.config as Record<string, unknown> | null)?.dayState, nowIso, periodKey);
       const plan = planTick(huntCfg, before);
       if (plan.dayDone) {
         // Quota met (or nothing left to build): sleep until the cadence boundary. No work, no notify.
@@ -1408,7 +1411,12 @@ Deno.serve(async (req) => {
       ran++;
       const slice = (async () => {
         try {
-          const r = await runClientHunt(admin, order, nowIso, plan);
+          const r = await runClientHunt(admin, order, nowIso, plan, async (d) => {
+            // Checkpoint: the search slice is spent even if the build below never finishes.
+            await admin.from('standing_orders').update({
+              config: { ...(order.config as Record<string, unknown> | null ?? {}), dayState: advanceDay(before, d) },
+            }).eq('id', order.id);
+          });
           const after = advanceDay(before, {
             searches: r.searches, demos: r.built, checks: r.checks, discovered: r.discovered,
             queued: r.queued, noEmail: r.noEmail, poolEmpty: r.poolEmpty,
@@ -2256,7 +2264,8 @@ async function runAreaStudy(admin: any, order: OrderRow, nowIso: string):
   return { line, done, audited, failed };
 }
 
-async function runClientHunt(admin: any, order: OrderRow, nowIso: string, plan: TickPlan):
+async function runClientHunt(admin: any, order: OrderRow, nowIso: string, plan: TickPlan,
+  onDiscovered?: (r: { searches: number; discovered: number }) => Promise<void>):
   Promise<{ discovered: number; built: number; queued: number; noEmail: number; checks: number; searches: number; poolEmpty: boolean; line: string }> {
   const zero = { discovered: 0, built: 0, queued: 0, noEmail: 0, checks: 0, searches: 0, poolEmpty: false };
   const cfg = parseHuntConfig(order.config);
@@ -2298,6 +2307,9 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string, plan: 
       if (r.apiError) { discoveryError = r.apiError; break; }
     }
   }
+  // CHECKPOINT the search spend NOW (review: an isolate torn down mid-build re-planned the same
+  // slice next tick and re-ran discovery — searchesPerDay was not a cap under repeated failure).
+  if (onDiscovered && (searches > 0 || discovered > 0)) await onDiscovered({ searches, discovered }).catch(() => {});
 
   // --- BUILD: this tick's demo slot — email first, then the demo, then the pitch -------------------
   let built = 0; let queued = 0; let noEmail = 0; let checks = 0; let poolEmpty = false;
@@ -2332,26 +2344,24 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string, plan: 
         const outcome = await buildDemoForLead(admin, order, lead, env, false, true);
         if (outcome === 'queued') { built++; queued++; }
         else if (outcome === 'built') built++;
-        else if (outcome === 'no_email') {
-          noEmail++;
-          await admin.from('discovered_businesses').update({ status: 'no_email', updated_at: nowIso }).eq('id', lead.id);
+        else {
+          // The set-aside must actually land (app_0160 widens the status check): a write that fails
+          // would leave the lead 'building' and the stale sweep would re-scrape it every 2 h forever.
+          // Counted ONLY when the row really changed — the day line never reports a set-aside that
+          // did not happen.
+          const target = outcome === 'no_email' ? 'no_email' : 'skipped';
+          const { data: moved, error: mvErr } = await admin.from('discovered_businesses')
+            .update({ status: target, updated_at: nowIso }).eq('id', lead.id).select('id');
+          if (mvErr || !moved?.length) {
+            await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: nowIso }).eq('id', lead.id).then(() => {}, () => {});
+          } else if (target === 'no_email') noEmail++;
         }
-        else await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: nowIso }).eq('id', lead.id);
       } catch { /* one lead failing never sinks the day — the stale sweep reclaims it next run */ }
     }
-    if (candidates.length === 0) {
-      // Nothing with a website left to work. Set aside a slice of the no-website leads so the pool
-      // reads honestly (their phone stays; the Prospects page lists them under "No email") and
-      // report the pool as empty so the clock stops spending ticks on it until discovery refills.
-      const { data: bare } = await admin.from('discovered_businesses')
-        .select('id').eq('owner_id', order.owner_id).eq('status', 'new').eq('has_website', false).limit(50);
-      const ids = ((bare ?? []) as { id: string }[]).map((b) => b.id);
-      if (ids.length) {
-        await admin.from('discovered_businesses').update({ status: 'no_email', updated_at: nowIso }).in('id', ids);
-        noEmail += ids.length;
-      }
-      poolEmpty = true;
-    }
+    // Nothing with a website left to work: the pool is empty for the UNATTENDED path. No-website
+    // leads keep their 'new' status on purpose — they are the operator's to build by hand ("Build
+    // & send" pitches by phone); the clock never relabels a lead it did not inspect.
+    if (candidates.length === 0) poolEmpty = true;
   }
 
   // A Places API error is the loud, actionable outcome — the operator needs to fix the key, not

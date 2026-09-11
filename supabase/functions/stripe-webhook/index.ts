@@ -154,7 +154,7 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
           body: JSON.stringify({ previewSiteId: previewId }),
         });
         const body = await r.json().catch(() => ({}));
-        if (r.ok && (body as { url?: string }).url) { liveUrl = (body as { url: string }).url; outcome = `auto-published → ${liveUrl}`; }
+        if (r.ok && (body as { url?: string }).url) { liveUrl = (body as { url: string }).url; outcome = `auto-published the pitched version → ${liveUrl}`; }
         else outcome = 'paid — click Go Live to publish';
       } catch { outcome = 'paid — click Go Live to publish'; }
     } else { outcome = 'paid — click Go Live to publish'; }   // 'notify'

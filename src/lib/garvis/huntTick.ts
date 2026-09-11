@@ -13,7 +13,8 @@
 // is visible to the operator ("today: 3 of 5 demos, 12 of 20 searches").
 
 export interface HuntDayState {
-  day: string;          // UTC YYYY-MM-DD this state belongs to — a new day resets every counter
+  day: string;          // the budget period this state belongs to (the caller's key — by default the
+                        // UTC date; the worker passes the order's cadence boundary) — a new period resets every counter
   searches: number;     // discovery searches spent today
   demos: number;        // demos BUILT today (only real builds count against the quota)
   checks: number;       // cheap email pre-checks spent today (never gated; informational)
@@ -39,10 +40,12 @@ function nonNeg(v: unknown): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
-/** Read the persisted day state; a missing/malformed/stale (different day) state is a fresh day. */
-export function dayStateFor(raw: unknown, nowIso: string): HuntDayState {
+/** Read the persisted day state; a missing/malformed/stale (different period) state is a fresh
+ *  period. `periodKey` names the budget window — pass the order's cadence boundary so a daily order
+ *  anchored at 20:00 does not get a second quota at UTC midnight; it defaults to the UTC date. */
+export function dayStateFor(raw: unknown, nowIso: string, periodKey: string = dayKey(nowIso)): HuntDayState {
   const fresh: HuntDayState = {
-    day: dayKey(nowIso), searches: 0, demos: 0, checks: 0, discovered: 0, queued: 0, noEmail: 0, poolEmpty: false,
+    day: periodKey, searches: 0, demos: 0, checks: 0, discovered: 0, queued: 0, noEmail: 0, poolEmpty: false,
   };
   if (!raw || typeof raw !== 'object') return fresh;
   const r = raw as Record<string, unknown>;

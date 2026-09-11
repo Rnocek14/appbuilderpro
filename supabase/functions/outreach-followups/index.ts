@@ -49,10 +49,13 @@ async function draftViaSeam(admin: any, ownerId: string, system: string, user: s
       costUsd: result.costUsd, kind: 'followup_draft', provider: model.provider, model: model.model,
       inputTokens: result.inputTokens, outputTokens: result.outputTokens,
     });
-    const parsed = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
-    if (!parsed.subject || !parsed.body) return null;
+    // Tolerate a prose preamble: take the first {...} block, then parse.
+    const raw = result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+    const braced = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1) || raw;
+    const parsed = JSON.parse(braced);
+    if (!parsed.subject || !parsed.body) { console.warn('followup draft skipped: no subject/body in model output'); return null; }
     const bodyOut = String(parsed.body).replace(/\\n/g, '\n');
-    if (!withinWordCap(bodyOut, cap)) return null;
+    if (!withinWordCap(bodyOut, cap)) { console.warn(`followup draft skipped: over the ${cap}-word cap`); return null; }
     parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
     return { subject: String(parsed.subject).slice(0, 200), body: bodyOut };
   } catch {

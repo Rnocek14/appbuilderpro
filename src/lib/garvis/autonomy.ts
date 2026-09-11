@@ -33,7 +33,7 @@ export const GRANTABLE_CLASSES: AutonomyClass[] = ['followup', 'invoice_chase', 
 /** Default daily cap when a class is first granted. Cold pitches start low on purpose; the
  *  operator raises it deliberately, and the send path's own daily cap + warm-up still apply. */
 export function defaultDailyCap(cls: AutonomyClass): number {
-  return cls === 'cold_pitch' ? 5 : 5;
+  return cls === 'cold_pitch' ? 3 : 5;
 }
 
 /** Map an approval row to its autonomy class from its payload markers — never from free text. */

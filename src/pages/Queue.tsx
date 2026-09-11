@@ -136,17 +136,24 @@ export default function Queue() {
     if (slateBusy || !slateOffered(slate)) return;
     const members = (approvals ?? []).filter((a) => slate.ids.includes(a.id));
     setSlateBusy({ done: 0, total: members.length });
-    let ok = 0, failed = 0;
+    let ok = 0, failed = 0, stopped: string | null = null;
     for (const a of members) {
       try {
         const res = await approveAndExecute(a);
         if (res.ok) { ok++; setApprovals((prev) => (prev ?? []).filter((x) => x.id !== a.id)); }
-        else failed++;
+        else {
+          failed++;
+          // A gate that applies to EVERY member (daily cap, warm-up, kill switch, missing sender)
+          // fails the rest identically — stop here and say so, instead of hammering send-email N times.
+          if (/daily send cap|warm-?up|outbound|kill switch|from_email|physical address|not configured/i.test(res.error ?? '')) { stopped = res.error ?? 'a send gate'; break; }
+        }
       } catch { failed++; }
       setSlateBusy({ done: ok + failed, total: members.length });
     }
     setSlateBusy(null);
-    toast(failed === 0 ? 'success' : ok === 0 ? 'error' : 'info', slateResultLine(ok, failed));
+    const remaining = members.length - ok - failed;
+    if (stopped) toast(ok > 0 ? 'info' : 'error', `Sent ${ok}, then stopped: ${stopped} ${remaining > 0 ? `${remaining} stay in the Queue.` : ''}`.trim());
+    else toast(failed === 0 ? 'success' : ok === 0 ? 'error' : 'info', slateResultLine(ok, failed));
     void refresh();
   };
 
@@ -272,7 +279,7 @@ export default function Queue() {
       if (e.key === 'j') { e.preventDefault(); setSel((s) => Math.min(s + 1, rows.length - 1)); }
       else if (e.key === 'k') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
       else if (!row) return;
-      else if (e.key === 'A' && slateOffered(slate)) { e.preventDefault(); void approveSlate(); }
+      else if (e.key === 'A' && slateOffered(slate)) { e.preventDefault(); if (!actingId && !slateBusy) void approveSlate(); }
       else if (e.key === 'a' && row.lane === 'decision') { e.preventDefault(); if (!actingId) void decide(row.a, true); }
       else if (e.key === 'x' && row.lane === 'decision') { e.preventDefault(); if (!actingId) void decide(row.a, false); }
       else if (e.key === 'r' && row.lane === 'message') { e.preventDefault(); openReply(row.m); }

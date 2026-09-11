@@ -1,5 +1,5 @@
 // src/components/garvis/AutonomyPanel.tsx
-// THE TRUST DIAL (app_0097, widened by app_0160). Five recurring approval classes, each with its
+// THE TRUST DIAL (app_0097). Five recurring approval classes on the dial, four grantable, each with its
 // real human-decision streak. Auto is OFFERED only after the streak earns it (5 clean approvals;
 // 25 for cold pitches — the one class that emails a stranger first), granted only by the
 // operator's click, capped per day, revoked in one click — and revocation is instant because

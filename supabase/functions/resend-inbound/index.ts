@@ -202,12 +202,25 @@ Deno.serve(async (req) => {
     .split(/\nOn .{0,120}wrote:\s*$/m)[0]
     .split(/\n-- ?\n/)[0]
     .trim();
+  // ONE REPLY, ONCE (app_0161): Resend delivers at least once and retries on any non-200 for up
+  // to ten hours. The inbound mail's own Message-ID is the idempotency key — checked BEFORE the
+  // model spend, so a redelivery costs nothing and lands nothing twice.
+  const providerMessageId = (payload.message_id ?? '').replace(/[<>]/g, '').trim() || null;
+  if (providerMessageId) {
+    const { data: dup } = await admin.from('replies').select('id')
+      .eq('owner_id', msg.owner_id).eq('provider_message_id', providerMessageId).limit(1);
+    if (dup?.length) return json({ ok: true, note: 'duplicate delivery; already recorded' });
+  }
   const classification = (await classifyAI(admin, msg.owner_id, subject, ownWords)) ?? classifyHeuristic(ownWords);
 
-  await admin.from('replies').insert({
+  const { error: replyErr } = await admin.from('replies').insert({
     owner_id: msg.owner_id, message_id: msg.id, campaign_id: msg.campaign_id,
     from_address: from, subject, body_text: text.slice(0, 8000), classification,
+    provider_message_id: providerMessageId,
   });
+  // A unique-index collision here is the race twin of the check above (two deliveries in flight
+  // at once): the first one won and did everything below; this one stops, honestly a duplicate.
+  if (replyErr && /duplicate|unique/i.test(replyErr.message)) return json({ ok: true, note: 'duplicate delivery; already recorded' });
   await admin.from('outreach_messages').update({ status: 'replied' }).eq('id', msg.id);
   // Feedback substrate (app_0081): a reply is the strongest engagement signal — record it where
   // the analytics lenses can rank it alongside opens/clicks.

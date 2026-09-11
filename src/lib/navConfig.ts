@@ -23,15 +23,18 @@ export interface NavSection { title: string; items: NavItem[] }
 export const NAV_SECTIONS: NavSection[] = [
   {
     // THE CORE LOOP — what you touch every day. Keep this to ~5 items.
+    // THE MONEY PATH, in the order the day runs: Home (the slate leads), Queue (one keypress),
+    // Prospects (what the hunt found), Money (who paid), Health (is it all on). Nothing else is
+    // daily. Channels/video, the builder, the lead markets and the rest live under "More" — one
+    // click away, never in the way (docs/revenue-focus-plan.md, docs/daily-run.md).
     title: 'Core',
     items: [
       { to: '/garvis/command', label: 'Home', icon: Sparkles },
-      // The content-channel daily loop: every growth world, its channels, and the one-click start.
-      { to: '/garvis/channels', label: 'Channels', icon: Film },
+      { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
       // The swift-prep screen: the prospect list + one-click Build & send (and the Claude scrape).
       { to: '/garvis/leads', label: 'Prospects', icon: Target },
-      { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
-      { to: '/garvis/client-book', label: 'Clients', icon: BookUser },
+      { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
+      { to: '/garvis/health', label: 'Health', icon: HeartPulse },
     ],
   },
   {
@@ -39,6 +42,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       // The richer hunt/config front door (set up ongoing hunts, verticals, territory).
       { to: '/garvis/clients', label: 'Find clients', icon: Rocket },
+      { to: '/garvis/client-book', label: 'Clients', icon: BookUser },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
       // Public records → ranked trade leads: markets on the hourly clock, approval-gated digests.
@@ -60,16 +64,10 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Money',
-    items: [
-      // ONE revenue room (SW2.6): the client book merged into Money as a tab; the old
-      // /garvis/client-billing route redirects there. Account /billing stays separate — plumbing.
-      { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
-    ],
-  },
-  {
     title: 'Automation & status',
     items: [
+      // The content-channel loop: every growth world, its channels, and the one-click start.
+      { to: '/garvis/channels', label: 'Channels', icon: Film },
       { to: '/garvis/automations', label: 'Automations', icon: Zap },
       { to: '/garvis/booking', label: 'Online booking', icon: CalendarClock },
       { to: '/garvis/missed-call', label: 'Missed-call text-back', icon: PhoneMissed },
@@ -77,7 +75,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/working', label: 'Working for you', icon: Activity },
       { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       { to: '/garvis/fleet', label: 'Fleet', icon: Satellite },
-      { to: '/garvis/health', label: 'Health', icon: HeartPulse },
     ],
   },
   {

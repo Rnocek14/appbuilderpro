@@ -20,6 +20,13 @@ check('a stale (yesterday) state resets', dayStateFor({ day: '2026-09-10', demos
 check('today\'s state is kept', dayStateFor({ day: '2026-09-11', demos: 2, searches: 7, poolEmpty: true }, now).demos === 2);
 check('garbage counters read as zero', dayStateFor({ day: '2026-09-11', demos: 'x', searches: -4 }, now).searches === 0);
 check('non-object raw is a fresh day', dayStateFor('nope', now).day === '2026-09-11');
+// The budget period is the caller's key: a daily order anchored at 20:00 keeps ONE quota across UTC midnight.
+const boundary = '2026-09-12T20:00:00.000Z';
+check('a period key keeps state across midnight', dayStateFor({ day: boundary, demos: 2, searches: 5 }, '2026-09-12T00:30:00.000Z', boundary).demos === 2);
+check('a different period key resets', dayStateFor({ day: boundary, demos: 2 }, '2026-09-12T20:30:00.000Z', '2026-09-13T20:00:00.000Z').demos === 0);
+check('fresh state carries the period key', dayStateFor(undefined, now, boundary).day === boundary);
+// The "churn" bound: searches spent, demos short, pool not empty → keeps waking (bounded by the pool + checks/tick).
+check('searches spent + demos short + pool not empty → still a demo tick', planTick(cfg, { ...fresh, searches: 10, demos: 1 }).demos === 1);
 
 // --- planTick ----------------------------------------------------------------------------
 const p0 = planTick(cfg, fresh);

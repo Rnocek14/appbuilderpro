@@ -8300,6 +8300,30 @@ revoke all on function public.garvis_disarm_heartbeat() from public;
 revoke all on function public.garvis_disarm_heartbeat() from anon;
 revoke all on function public.garvis_disarm_heartbeat() from authenticated;
 
+-- ======== supabase/migrations/app_0160_no_email_status.sql ========
+-- app_0160_no_email_status.sql — THE 'no_email' PROSPECT STATUS (hunt tick, email-first builds).
+-- The unattended hunt now checks for a public email BEFORE any model spend and sets aside a lead
+-- it cannot email (status 'no_email', phone intact — the Prospects page lists them under their
+-- own chip; "Build & send" still applies). app_0072's check constraint only knew new/built/
+-- skipped, so the set-aside write would have failed silently and the lead would have bounced
+-- between 'building' and 'new' forever. Additive + idempotent: the constraint is widened; rows
+-- are untouched. (The constraint was created inline in app_0072, so its name is the default.)
+alter table public.discovered_businesses drop constraint if exists discovered_businesses_status_check;
+alter table public.discovered_businesses
+  add constraint discovered_businesses_status_check
+  check (status in ('new', 'building', 'built', 'skipped', 'no_email'));
+
+-- ======== supabase/migrations/app_0161_replies_dedupe.sql ========
+-- app_0161_replies_dedupe.sql — ONE REPLY, ONCE. Replies now arrive through resend-webhook
+-- (Resend "Receiving", at-least-once delivery with retries from 5 s to 10 h). resend-inbound
+-- classifies (a model spend), inserts the reply, stops the sequence, and notifies — with no
+-- idempotency key, a redelivery would land the same reply twice in the Queue and charge twice.
+-- The inbound mail's own Message-ID is the key: stored on the reply, unique per owner where
+-- present; resend-inbound checks it BEFORE classification and answers "duplicate" instead.
+alter table public.replies add column if not exists provider_message_id text;
+create unique index if not exists replies_owner_provider_message_id_key
+  on public.replies(owner_id, provider_message_id) where provider_message_id is not null;
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

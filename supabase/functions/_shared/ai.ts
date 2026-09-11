@@ -46,11 +46,14 @@ export function estimateCost(model: string, inTok: number, outTok: number): numb
   return (inTok * p.in + outTok * p.out) / 1_000_000;
 }
 
+/** The one fallback when AI_MODEL is unset: the current Sonnet — newer AND cheaper per token than
+ *  the 4.6 it replaces (list price checked Sept 2026). Configuration is env-first; this constant
+ *  exists so the fallback has one name, not a literal scattered through call sites. */
+const HOUSE_DEFAULT_MODEL = 'claude-sonnet-5';
+
 export function getProviderConfig() {
   const provider = (Deno.env.get('AI_PROVIDER') ?? 'anthropic') as AIProvider;
-  // House default: the current Sonnet — newer AND cheaper per token than the 4.6 it replaces
-  // (list price checked Sept 2026). AI_MODEL overrides; the deployed project may pin its own.
-  const model = Deno.env.get('AI_MODEL') ?? 'claude-sonnet-5';
+  const model = Deno.env.get('AI_MODEL') ?? HOUSE_DEFAULT_MODEL;
   return { provider, model };
 }
 
