@@ -23,8 +23,10 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { episodePerf, hookIntel, type EpisodeMetricRow } from '../../../src/lib/garvis/growthLoop.ts';
 import { FACT_SCRIPT_SYSTEM, buildFactScriptUser } from '../_shared/factScriptCore.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
-import { notifyText } from '../_shared/notify.ts';
-import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
+import { notifyText, notifyOwner } from '../_shared/notify.ts';
+import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, breakerTrips, ORDER_BREAKER_LIMIT, type WatchResult } from '../_shared/standingCore.ts';
+import { expiresAtFor, reminderDue } from '../_shared/approvalTtl.ts';
+import { quarantineExternal, quarantineNote } from '../_shared/untrustedText.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
 import { sendBookingNotice } from '../_shared/bookingNotify.ts';
@@ -70,7 +72,27 @@ import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // draft never auto-queues) + the pure week machinery from standingCore.
 import { honestySystemPrompt, judgeSystemPrompt, judgeUserPrompt, parseJudgeVerdict } from '../_shared/copyJudge.ts';
 import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/standingCore.ts';
-import { composeBatchRecipients } from '../_shared/batchCore.ts';
+import { composeBatchRecipients, unknownTokens } from '../_shared/batchCore.ts';
+import { computeSegment, nextDripStep, type SentStep, type DripStep, type BehavioralRule } from '../_shared/emailFlowsCore.ts';
+import { sunsetContacts } from '../_shared/emailPlacementCore.ts';
+// Aliased: HuntEnv's own `serviceKey` field is the service-role key — a different thing entirely.
+import { serviceKey as connectionKey } from '../_shared/connections.ts';
+// SW6.1 — the worker takes the creative load: the same shared cores the client executors use,
+// so an approved arc's social/segment/CTA/episode steps advance overnight to PENDING APPROVALS
+// (never to sends — porting moves work server-side, never approval).
+import { checkDraft, PLATFORM_LABEL } from '../_shared/socialCore.ts';
+import { parseFactScript } from '../../../src/lib/garvis/factChannel.ts';
+import { templateById, flattenTemplate, type Charter } from '../../../src/lib/garvis/workweb.ts';
+// SW6.2 — the producer trio server-side: same pure cores, same artifact shapes, same honesty
+// seams as the client producers (field-level parity pinned by arcParity.verify).
+import { produceResearchSrv, produceBusinessPlanSrv, produceCampaignSrv, persistProducedSrv } from '../_shared/producersSrv.ts';
+// SW6.3 — the genesis actions: drafts only, through the same pure parsers; approval (and
+// therefore instantiation of a genesis world) remains the operator's client-side ceremony.
+import { generateDraftSrv } from '../_shared/genesisSrv.ts';
+import { intakeFor, clientWorldIntent } from '../../../src/lib/garvis/clientEngagement.ts';
+import { VERTICAL_LIBRARY } from '../../../src/lib/garvis/verticalPlan.ts';
+// SW8.3 — the risk chip: deterministic scoring for pending approvals (display; the gate recomputes).
+import { riskFor } from '../../../src/lib/garvis/approvalRisk.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
@@ -132,12 +154,14 @@ Deno.serve(async (req) => {
       .update({ status: 'building', updated_at: new Date().toISOString() })
       .eq('id', body.pitch_lead_id).eq('owner_id', ownerScope).neq('status', 'building').select('id');
     if (!claimRows?.length) return json({ error: 'This prospect is already being built — give it a moment.' }, 409);
+    // Connection-first (API manager): the pitch build hunts on the owner's own Places key.
+    const { key: pitchPlacesKey } = await connectionKey(admin, ownerScope, 'google_places', 'GOOGLE_PLACES_API_KEY');
     const env: HuntEnv = {
       supabaseUrl: Deno.env.get('SUPABASE_URL')!,
       workerSecret: workerSecret ?? '',
       serviceKey,
       appOrigin,
-      placesKey: Deno.env.get('GOOGLE_PLACES_API_KEY') ?? '',
+      placesKey: pitchPlacesKey ?? '',
       nowYear: new Date(nowIso).getUTCFullYear(),
       runRatings: new Map(),
     };
@@ -228,6 +252,263 @@ Deno.serve(async (req) => {
       }
     } catch { /* the wake sweep must never wedge the order tick */ }
 
+    // ---- STALLED-BUILD WATCHDOG (SW10.6) -----------------------------------------------------
+    // A generation whose stage marks stopped moving for 10+ minutes is a dead build, not a slow
+    // one. Enqueue ONE server resume (SW10.5) per stall, at most twice per generation — after the
+    // second attempt the row flips to a NAMED failed state, so a permanently-broken build stops
+    // consuming credits. The mind_event for a resume is written at job COMPLETION (job-worker),
+    // never here at enqueue — no fake progress; only the cap-exceeded flip speaks from this sweep.
+    try {
+      const staleIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: stalledGens } = await admin.from('project_generations')
+        .select('id, project_id, user_id, resume_attempts')
+        .eq('status', 'running').lt('updated_at', staleIso).limit(10);
+      for (const g of (stalledGens ?? []) as { id: string; project_id: string; user_id: string; resume_attempts: number }[]) {
+        if ((g.resume_attempts ?? 0) >= 2) {
+          const { data: cas } = await admin.from('project_generations')
+            .update({ status: 'failed', error: 'stalled — automatic resume failed twice; needs your attention', finished_at: nowIso })
+            .eq('id', g.id).eq('status', 'running').select('id');
+          if (cas?.length) {
+            await admin.from('mind_events').insert({
+              owner_id: g.user_id, event_type: 'note', source: 'builder',
+              subject: 'A build stalled and two automatic resumes did not fix it — open the project to see what remains',
+              payload: { key: `gen-stalled:${g.id}`, project_id: g.project_id, generation_id: g.id },
+            }).then(() => {}, () => {});
+          }
+          continue;
+        }
+        // One live resume per project — idempotent against the enqueue seam and prior ticks.
+        // 'paused' and 'waiting_approval' count as LIVE (deep review): a credit-paused resume
+        // must not burn a second attempt and later flip the build "failed" over an empty balance.
+        const { data: existingJob } = await admin.from('jobs')
+          .select('id').eq('project_id', g.project_id).eq('kind', 'generation_resume')
+          .in('status', ['queued', 'running', 'paused', 'waiting_approval']).limit(1);
+        if (existingJob?.length) continue;
+        // Bump the attempt BEFORE inserting the job (CAS on the exact prior count) — a crash
+        // between the two costs one unused attempt, never an uncounted spend loop.
+        const { data: bumped } = await admin.from('project_generations')
+          .update({ resume_attempts: (g.resume_attempts ?? 0) + 1 })
+          .eq('id', g.id).eq('status', 'running').eq('resume_attempts', g.resume_attempts ?? 0).select('id');
+        if (!bumped?.length) continue;
+        await admin.from('jobs').insert({
+          owner_id: g.user_id, project_id: g.project_id,
+          kind: 'generation_resume', phase: 'resume',
+          title: 'Resume interrupted build',
+          brief: 'Watchdog: the generation stopped marking stages — derive missing pages from the saved App.tsx and recover them.',
+          payload: { generation_id: g.id },
+        }).then(() => {}, () => {});
+        // Nudge the job worker now; its cron tick is the guarantee.
+        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/job-worker`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-worker-secret': workerSecret ?? '', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({}),
+        }).catch(() => {});
+      }
+    } catch { /* the watchdog must never wedge the order tick */ }
+
+    // ---- EMAIL FLOW SWEEP (SW10.7, hardened by the SW10 deep review) -------------------------
+    // Behavioral segments + drips, clock-executed on the EXISTING rails. Membership derives from
+    // REAL outreach_events; a later drip step fires only on the REAL absence of a reply; and every
+    // due cohort becomes one outreach_batch + one send_batch approval — content-hash bound, like
+    // every client-minted batch — that the drain executes with suppression/caps/kill-switch
+    // re-checked per recipient. Deep-review hardening: members are CLAIMED (CAS placeholder) BEFORE
+    // a batch exists, so a crash or an overlapping tick can never double-stage a cohort; the reply
+    // query is chunked/ordered/bounded; excluded recipients never falsely advance; canceled and
+    // stale stagings self-heal; flows rotate (touch → oldest-first) so no tenant starves.
+    try {
+      const chunk = <T,>(a: T[], n: number): T[][] => { const out: T[][] = []; for (let i = 0; i < a.length; i += n) out.push(a.slice(i, i + n)); return out; };
+      const { data: activeFlows } = await admin.from('email_flows')
+        .select('id, owner_id, world_id, name, segment_rule, steps')
+        .eq('status', 'active').order('updated_at', { ascending: true }).limit(3);
+      for (const flow of (activeFlows ?? []) as { id: string; owner_id: string; world_id: string | null; name: string; segment_rule: BehavioralRule; steps: DripStep[] }[]) {
+        const rule = flow.segment_rule;
+        const steps = flow.steps ?? [];
+        if (!steps.length) continue;
+        // Rotate: touch the flow so oldest-updated-first round-robins past the 3-per-tick cap.
+        await admin.from('email_flows').update({ status: 'active' }).eq('id', flow.id).eq('status', 'active').then(() => {}, () => {});
+
+        // 1) ENROLL from real events in the rule's window (once per contact, ever). Ordered newest
+        //    first; a FULL read means the window was truncated — skip enrollment rather than
+        //    enroll from an arbitrary subset (enrollment is permanent, so one bad tick would be too).
+        const sinceIso = new Date(Date.now() - Math.max(1, rule.sinceDays ?? 7) * 86_400_000).toISOString();
+        const { data: evRows, error: evErr } = await admin.from('outreach_events')
+          .select('contact_id, kind, created_at')
+          .eq('owner_id', flow.owner_id).gte('created_at', sinceIso)
+          .order('created_at', { ascending: false }).limit(5000);
+        if (!evErr && (evRows ?? []).length < 5000) {
+          const seg = computeSegment(evRows ?? [], rule, nowIso);
+          // THE SUNSET RULE (emailPlacementCore): a contact delivered 5+ emails in this window who
+          // never opened/clicked/replied is asleep — enrolling them again is the spam signal
+          // providers punish hardest. Matters most to 'no_open' flows, deliberately: one
+          // re-engagement attempt is a play; the sixth is a reputation tax. A single real
+          // engagement inside the window wakes them right back up.
+          const asleep = sunsetContacts(evRows ?? []);
+          const enrollIds = seg.contactIds.filter((cid) => !asleep.has(cid));
+          if (enrollIds.length) {
+            await admin.from('email_flow_members').upsert(
+              enrollIds.slice(0, 500).map((cid) => ({ owner_id: flow.owner_id, flow_id: flow.id, contact_id: cid })),
+              { onConflict: 'flow_id,contact_id', ignoreDuplicates: true },
+            ).then(() => {}, () => {});
+          }
+        }
+
+        // 2) Load live members (stable order); find each member's LATEST reply. Chunked (URL
+        //    limits), ordered, bounded from the earliest enrollment — an error skips the flow
+        //    this tick rather than running with the reply gate silently off.
+        const { data: memberRows } = await admin.from('email_flow_members')
+          .select('id, contact_id, enrolled_at, replied_at, steps_sent')
+          .eq('flow_id', flow.id).is('replied_at', null)
+          .order('enrolled_at', { ascending: true }).limit(500);
+        const members = (memberRows ?? []) as { id: string; contact_id: string; enrolled_at: string; replied_at: string | null; steps_sent: SentStep[] }[];
+        if (!members.length) continue;
+        const minEnrolled = members.reduce((a, m) => (m.enrolled_at < a ? m.enrolled_at : a), members[0].enrolled_at);
+        const latestReplyBy = new Map<string, string>();
+        let replyReadFailed = false;
+        for (const ids of chunk(members.map((m) => m.contact_id), 100)) {
+          const { data: reps, error: rErr } = await admin.from('outreach_events')
+            .select('contact_id, created_at').eq('owner_id', flow.owner_id).eq('kind', 'replied')
+            .gte('created_at', minEnrolled).in('contact_id', ids)
+            .order('created_at', { ascending: false }).limit(1000);
+          if (rErr) { replyReadFailed = true; break; }
+          for (const r of (reps ?? []) as { contact_id: string | null; created_at: string }[]) {
+            if (r.contact_id && !latestReplyBy.has(r.contact_id)) latestReplyBy.set(r.contact_id, r.created_at); // desc order → first = latest
+          }
+        }
+        if (replyReadFailed) continue; // never stage with the reply gate blind
+
+        // 3) Backfill from batch reality: 'done' stamps drained_at (the delay clock);
+        //    'canceled' with nothing sent strips the entry so the step can re-stage under a fresh
+        //    approval; a placeholder (batch_id null) older than an hour is a crashed staging — strip.
+        const pendingBatchIds = [...new Set(members.flatMap((m) => (m.steps_sent ?? []).filter((s) => s.batch_id && !s.drained_at).map((s) => s.batch_id)))];
+        const drainedBy = new Map<string, string>();
+        const canceledDead = new Set<string>();   // canceled, zero sent → safe to re-stage
+        const canceledPartial = new Map<string, string>(); // canceled after partial sends → never re-stage
+        for (const ids of chunk(pendingBatchIds, 100)) {
+          const { data: batches } = await admin.from('outreach_batches')
+            .select('id, status, finished_at, recipients').in('id', ids);
+          for (const b of (batches ?? []) as { id: string; status: string; finished_at: string | null; recipients: unknown }[]) {
+            if (b.status === 'done') drainedBy.set(b.id, b.finished_at ?? nowIso);
+            else if (b.status === 'canceled') {
+              const anySent = Array.isArray(b.recipients) && (b.recipients as { state?: string }[]).some((r) => r.state === 'sent');
+              if (anySent) canceledPartial.set(b.id, b.finished_at ?? nowIso); else canceledDead.add(b.id);
+            }
+          }
+        }
+        const staleBefore = Date.now() - 60 * 60 * 1000;
+
+        // 4) Decide each member through the pure gate; collect due members per step.
+        const cohorts = new Map<number, typeof members>();
+        for (const m of members) {
+          const latest = latestReplyBy.get(m.contact_id);
+          const replied = latest && Date.parse(latest) >= Date.parse(m.enrolled_at) ? latest : null;
+          const sent = (m.steps_sent ?? []) as SentStep[];
+          const repaired = sent
+            .filter((s) => !(s.batch_id && canceledDead.has(s.batch_id)))                                     // canceled-unsent → re-stage
+            .filter((s) => !(!s.batch_id && !s.drained_at && Date.parse(s.staged_at) < staleBefore))          // crashed placeholder → re-stage
+            .map((s) => {
+              if (s.drained_at) return s;
+              if (s.batch_id && drainedBy.has(s.batch_id)) return { ...s, drained_at: drainedBy.get(s.batch_id)! };
+              if (s.batch_id && canceledPartial.has(s.batch_id)) return { ...s, drained_at: canceledPartial.get(s.batch_id)! }; // partial: never re-send
+              return s;
+            });
+          if (replied || JSON.stringify(repaired) !== JSON.stringify(sent)) {
+            await admin.from('email_flow_members')
+              .update({ ...(replied ? { replied_at: replied } : {}), steps_sent: repaired })
+              .eq('id', m.id).then(() => {}, () => {});
+            if (replied) {
+              // A reply also PRUNES the contact from any still-QUEUED flow batch (deep review:
+              // the staging→approval→drain window is unbounded, and "has NOT replied" must stay
+              // true at send time). CAS on 'queued' — a draining batch is the drain's to manage.
+              for (const s of repaired) {
+                if (!s.batch_id || s.drained_at) continue;
+                const { data: qb } = await admin.from('outreach_batches')
+                  .select('id, status, recipients').eq('id', s.batch_id).eq('status', 'queued').maybeSingle();
+                if (!qb) continue;
+                const recips = (qb.recipients as { contactId?: string; state?: string; reason?: string }[] | null) ?? [];
+                const pruned = recips.map((r) => (r.contactId === m.contact_id && r.state === 'pending'
+                  ? { ...r, state: 'skipped', reason: 'replied before send' } : r));
+                await admin.from('outreach_batches').update({ recipients: pruned })
+                  .eq('id', s.batch_id).eq('status', 'queued').then(() => {}, () => {});
+              }
+              continue; // the drip ends on a REAL reply
+            }
+            m.steps_sent = repaired;
+          }
+          const due = nextDripStep(steps, m.steps_sent ?? [], replied, m.enrolled_at, nowIso);
+          if (!due) continue;
+          const list = cohorts.get(due.stepIndex) ?? [];
+          list.push(m); cohorts.set(due.stepIndex, list);
+        }
+
+        // 5) CLAIM members first (CAS placeholder), THEN one batch + ONE approval per cohort.
+        //    The CAS makes exactly one invocation win each member — a crash after claiming leaves
+        //    a placeholder the next tick strips (step 3), never a double batch.
+        for (const [stepIndex, cohort] of cohorts) {
+          const step = steps[stepIndex];
+          if (!step || unknownTokens(`${step.subject}\n${step.body}`).length) continue; // never send literal tokens
+          const claimed: typeof members = [];
+          for (const m of cohort.slice(0, 200)) {   // bounded per tick — the rest stage next tick
+            const placeholder = { stepIndex, batch_id: null, staged_at: nowIso, drained_at: null };
+            const { data: won } = await admin.from('email_flow_members')
+              .update({ steps_sent: [...(m.steps_sent ?? []), placeholder] })
+              .eq('id', m.id)
+              .filter('steps_sent', 'eq', JSON.stringify(m.steps_sent ?? []))
+              .select('id');
+            if (won?.length) { m.steps_sent = [...(m.steps_sent ?? []), placeholder as unknown as SentStep]; claimed.push(m); }
+          }
+          if (!claimed.length) continue;
+
+          const contactRows: { id: string; email: string | null; full_name: string | null; email_status: string | null }[] = [];
+          for (const ids of chunk(claimed.map((m) => m.contact_id), 100)) {
+            const { data: cs } = await admin.from('contacts')
+              .select('id, email, full_name, email_status').eq('owner_id', flow.owner_id).in('id', ids);
+            contactRows.push(...((cs ?? []) as typeof contactRows));
+          }
+          const { recipients } = composeBatchRecipients(contactRows);
+          const inBatch = new Set(recipients.map((r) => r.contactId));
+          // Members excluded for good (suppressed/bad/no email) close this step WITHOUT a send —
+          // batch_id stays null, skipped names why, drained_at set so they neither spin nor look sent.
+          for (const m of claimed.filter((x) => !inBatch.has(x.contact_id))) {
+            const sentArr = [...(m.steps_sent ?? [])];
+            const ph = sentArr[sentArr.length - 1] as unknown as { skipped?: string; drained_at: string | null };
+            ph.skipped = 'excluded at compose (suppressed, bad status, or no email)';
+            ph.drained_at = nowIso;
+            await admin.from('email_flow_members').update({ steps_sent: sentArr }).eq('id', m.id).then(() => {}, () => {});
+          }
+          if (!recipients.length) continue;
+
+          const { data: batch } = await admin.from('outreach_batches').insert({
+            owner_id: flow.owner_id, world_id: flow.world_id, subject: step.subject, body_text: step.body,
+            recipients, status: 'queued',
+          }).select('id').single();
+          if (!batch) continue; // claimed placeholders strip after an hour and re-stage
+          const batchId = (batch as { id: string }).id;
+          // The SAME content-hash binding every client-minted batch carries (deep review: the
+          // drain's strongest tamper check must not be skipped for machine-minted batches).
+          const contentHash = await hashPayload({
+            subject: step.subject, body_text: step.body,
+            recipients: recipients.map((r) => ({ email: r.email, name: r.name })),
+          });
+          const apPayload = { batch_id: batchId, recipient_count: recipients.length, content_hash: contentHash };
+          const { data: ap } = await admin.from('approvals').insert({
+            owner_id: flow.owner_id, kind: 'send_batch',
+            title: `Flow "${flow.name}" step ${stepIndex + 1} → ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
+            preview: `${step.body.slice(0, 240)}${step.body.length > 240 ? '…' : ''}\n\nBehavioral drip step ${stepIndex + 1}/${steps.length} — recipients ${stepIndex > 0 ? 'have NOT replied to the previous step' : `matched "${rule.kind}" on real events`}. The clock drains this under your daily cap after you approve.`,
+            payload: apPayload, payload_hash: await hashPayload(apPayload), requested_by: 'garvis-flow',
+            world_id: flow.world_id, expires_at: expiresAtFor('send_batch', nowIso),
+          }).select('id').single();
+          if (!ap) { await admin.from('outreach_batches').update({ status: 'canceled', finished_at: nowIso }).eq('id', batchId); continue; }
+          await admin.from('outreach_batches').update({ approval_id: (ap as { id: string }).id }).eq('id', batchId);
+          // Fill the claimed placeholders with the real batch id (only IN-BATCH members).
+          for (const m of claimed.filter((x) => inBatch.has(x.contact_id))) {
+            const sentArr = [...(m.steps_sent ?? [])];
+            (sentArr[sentArr.length - 1] as unknown as { batch_id: string | null }).batch_id = batchId;
+            await admin.from('email_flow_members').update({ steps_sent: sentArr }).eq('id', m.id).then(() => {}, () => {});
+          }
+        }
+      }
+    } catch { /* the flow sweep must never wedge the order tick */ }
+
     // ---- ARC ADVANCE (server-side execution of mechanical steps) -----------------------------
     // A 'ready' arc advances RIGHT HERE for every step whose action is purely mechanical
     // (standing orders, records, reminders, invoices — no model, no browser). Creative steps
@@ -277,10 +558,25 @@ Deno.serve(async (req) => {
           continue;
         }
         const { data: ap } = await admin.from('approvals')
-          .select('id, owner_id, kind, status').eq('id', b.approval_id).single();
+          .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', b.approval_id).single();
         if (!ap || ap.kind !== 'send_batch' || ap.owner_id !== b.owner_id) { await cancel('approval record invalid'); continue; }
         if (ap.status === 'rejected' || ap.status === 'expired') { await cancel(`approval ${ap.status}`); continue; }
         if (ap.status !== 'approved') continue; // still awaiting the human — not our call to make
+        // THE BINDING (deep review 2026-08 #1): the approval must cover THIS batch — its payload
+        // names the batch id, the payload hash proves the payload is the one that was approved,
+        // and the content hash proves the subject/body/audience are what the human actually saw.
+        // A finished batch CONSUMES its approval, so one decision is never a reusable send grant.
+        const apPayload = (ap.payload ?? {}) as { batch_id?: string; content_hash?: string };
+        if (apPayload.batch_id !== b.id) { await cancel('approval does not cover this batch'); continue; }
+        if (!(await payloadMatches(ap.payload, ap.payload_hash as string | null))) { await cancel('approval payload changed since it was approved'); continue; }
+        if ((ap.result as { consumed_at?: string } | null)?.consumed_at) { await cancel('approval already fully used'); continue; }
+        if (apPayload.content_hash) {
+          const liveHash = await hashPayload({
+            subject: b.subject, body_text: b.body_text,
+            recipients: (b.recipients ?? []).map((r) => ({ email: r.email, name: r.name })),
+          });
+          if (liveHash !== apPayload.content_hash) { await cancel('batch content changed after approval'); continue; }
+        }
 
         const recips: BatchRecipient[] = Array.isArray(b.recipients) ? b.recipients : [];
         // Persist each recipient's outcome IMMEDIATELY, not after the whole slice.
@@ -307,6 +603,9 @@ Deno.serve(async (req) => {
           // swept) before finishing — never mark a batch done while a send is unconfirmed.
           if (prog.sending > 0) continue;
           await admin.from('outreach_batches').update({ status: 'done', finished_at: nowIso }).eq('id', b.id);
+          // Consume the approval: this decision authorized THIS batch once, and it is spent.
+          await admin.from('approvals').update({ result: { consumed_at: nowIso, batch_id: b.id } })
+            .eq('id', b.approval_id).then(() => {}, () => {});
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',
             subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,
@@ -376,6 +675,9 @@ Deno.serve(async (req) => {
           ...(finished ? { status: 'done', finished_at: nowIso } : {}),
         }).eq('id', b.id).in('status', ['queued', 'draining']);
         if (finished) {
+          // Consume the approval: this decision authorized THIS batch once, and it is spent.
+          await admin.from('approvals').update({ result: { consumed_at: nowIso, batch_id: b.id } })
+            .eq('id', b.approval_id).then(() => {}, () => {});
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',
             subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,
@@ -633,6 +935,7 @@ Deno.serve(async (req) => {
               // line makes the whole downstream ledger client-attributable.
               world_id: client?.worldId ?? null,
               payload, payload_hash, requested_by: 'garvis-auto',
+              expires_at: expiresAtFor(isSms ? 'send_sms' : 'send_email', new Date().toISOString()),
             }).select('id').single();
             if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
 
@@ -990,10 +1293,15 @@ Deno.serve(async (req) => {
           }
 
           // 3. EXTRACT — one batched, credit-metered call bound to the fetched-URL allowlist.
+          let quarantineFlags: string[] = [];
           if (pages.length) {
             await checkCredits(admin, order.owner_id, 'discover');
             const m = modelForPlan(await getUserPlan(admin, order.owner_id));
-            const blocks = pages.map((p, i) => `PAGE ${i + 1} · ${p.url}\n${p.text}`).join('\n\n');
+            // INJECTION QUARANTINE (SW4.2): fetched pages are hostile-by-default — neutralize
+            // instruction-shaped lines and fence the lot; a flag surfaces on the result line.
+            const quarantined = pages.map((p) => ({ url: p.url, q: quarantineExternal(p.text) }));
+            quarantineFlags = [...new Set(quarantined.flatMap((x) => x.q.reasons))];
+            const blocks = quarantined.map((x, i) => `PAGE ${i + 1} · ${x.url}\n${x.q.text}`).join('\n\n');
             const result = await complete([
               { role: 'system', content: EXTRACT_SYSTEM },
               { role: 'user', content: `${blocks}\n\nExtract the real opportunities now (strict JSON array):` },
@@ -1017,6 +1325,9 @@ Deno.serve(async (req) => {
           }
           line = huntLine(focus, searched, pages.length, found, thin);
           if (rendered > 0) line += ` (${rendered} JS-rendered page${rendered === 1 ? '' : 's'} read via the rendered fetch)`;
+          // Never silent: a quarantine hit is stated on the order's own line (recall stays —
+          // flagged pages are still READ as data; only their instruction-shaped lines are gone).
+          if (quarantineFlags.length) line += ` ${quarantineNote({ text: '', flagged: true, reasons: quarantineFlags })}.`;
         }
 
         ran++;
@@ -1519,6 +1830,122 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ---- ORDER BREAKER (app_0140): repeated failure becomes a fact the operator SEES ----------
+  // Mirrors the app_0113 trigger breaker, at ONE site by design: every branch above stamps
+  // last_result.checkedAt with THIS tick's nowIso, so what just happened is readable from the
+  // rows without threading streak state through eight catch paths. Unreachable this tick bumps
+  // the streak; any other outcome this tick clears it; at ORDER_BREAKER_LIMIT the order pauses
+  // itself with the reason on the row, a mind_event for the waking moment, and a webhook nudge.
+  // Resume (setOrderStatus → active) clears the streak — trying again is a fresh start.
+  if (rows?.length) {
+    const { data: fresh } = await admin.from('standing_orders')
+      .select('id, owner_id, label, status, consecutive_failures, last_result')
+      .in('id', rows.map((r: { id: string }) => r.id));
+    for (const o of (fresh ?? []) as { id: string; owner_id: string; label: string; status: string; consecutive_failures: number; last_result: { status?: string; line?: string; checkedAt?: string } | null }[]) {
+      const lr = o.last_result;
+      if (!lr || lr.checkedAt !== nowIso) continue;               // did not run this tick
+      if (lr.status !== 'unreachable') {
+        // A success closes the breaker: transient blips never accumulate into a false pause.
+        if (o.consecutive_failures > 0) {
+          await admin.from('standing_orders')
+            .update({ consecutive_failures: 0, last_error: null, last_error_at: null })
+            .eq('id', o.id).then(() => {}, () => {});
+        }
+        continue;
+      }
+      const streak = o.consecutive_failures + 1;
+      const tripped = breakerTrips(streak) && o.status === 'active';
+      await admin.from('standing_orders').update({
+        consecutive_failures: streak,
+        last_error: (lr.line ?? 'failed').slice(0, 500), last_error_at: nowIso,
+        ...(tripped ? { status: 'paused' } : {}),
+      }).eq('id', o.id).then(() => {}, () => {});
+      if (tripped) {
+        await admin.from('mind_events').insert({
+          owner_id: o.owner_id, event_type: 'note', source: 'execution',
+          subject: `🔴 Standing order "${o.label.slice(0, 100)}" paused itself after ${ORDER_BREAKER_LIMIT} straight failures: ${(lr.line ?? '').slice(0, 160)}`,
+          payload: { key: `order-breaker:${o.id}`, order_id: o.id, consecutive_failures: streak },
+        }).then(() => {}, () => {});
+        await notifyOwner(admin, o.owner_id,
+          `🔴 Standing order "${o.label.slice(0, 80)}" paused itself after ${ORDER_BREAKER_LIMIT} straight failures. Fix the cause, then Resume it from its panel.`).catch(() => {});
+      }
+    }
+  }
+
+  // ---- THE RISK CHIP (SW8.3): annotate pending approvals from deterministic features -------
+  // Display-side only — the Queue renders the score with its named reasons. The GATE
+  // (autonomyGate) recomputes from raw facts and never trusts these columns.
+  try {
+    const { data: unscored } = await admin.from('approvals')
+      .select('id, owner_id, kind, payload, created_at')
+      .eq('status', 'pending').is('risk_score', null)
+      .order('created_at', { ascending: true }).limit(20);
+    for (const a of (unscored ?? []) as { id: string; owner_id: string; kind: string; payload: Record<string, unknown> | null; created_at: string }[]) {
+      const p = a.payload ?? {};
+      const amount = typeof p.amount_usd === 'number' ? p.amount_usd : typeof p.amount === 'number' ? p.amount : null;
+      // Recipient-known: only computable for message-backed sends — a to_address with zero
+      // previously-sent messages is a first contact. Null (not applicable) adds no risk.
+      let recipientKnown: boolean | null = null;
+      if (typeof p.message_id === 'string') {
+        const { data: msg } = await admin.from('outreach_messages').select('to_address').eq('id', p.message_id).maybeSingle();
+        const to = (msg as { to_address?: string | null } | null)?.to_address?.trim().toLowerCase();
+        if (to) {
+          const { count } = await admin.from('outreach_messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('owner_id', a.owner_id).eq('to_address', to).eq('status', 'sent');
+          recipientKnown = (count ?? 0) > 0;
+        }
+      }
+      const v = riskFor({ kind: a.kind, amountUsd: amount, recipientKnown, mintedHourLocal: new Date(a.created_at).getUTCHours(), payloadBytes: JSON.stringify(p).length, classMedianBytes: null });
+      await admin.from('approvals').update({ risk_score: v.score, risk_reasons: v.reasons }).eq('id', a.id).is('risk_score', null);
+    }
+  } catch { /* the chip is best-effort; the Queue renders without it */ }
+
+  // ---- THE DECISION CLOCK, part 2 (SW5.1): nudge at half-life, expire past the window ------
+  // Order matters: the NUDGE path went live in the same change as the sweep, so pending work
+  // cannot silently lapse for an operator with no channel — notifyOwner falls back to their own
+  // email, and Health names the no-channel gap. Dedupe is the server ledger (app_0145): one
+  // observation, notified once per channel, ever.
+  try {
+    const { data: pend } = await admin.from('approvals')
+      .select('id, owner_id, kind, title, payload, created_at, expires_at, reminded_at')
+      .eq('status', 'pending').not('expires_at', 'is', null)
+      .order('created_at', { ascending: true }).limit(50);
+    const pending = (pend ?? []) as { id: string; owner_id: string; kind: string; title: string; payload: Record<string, unknown> | null; created_at: string; expires_at: string; reminded_at: string | null }[];
+
+    // Half-life nudges — at most a handful per tick, each recorded before it rings.
+    for (const a of pending.filter((x) => reminderDue(x.created_at, x.expires_at, x.reminded_at, nowIso)).slice(0, 5)) {
+      const { data: claimed } = await admin.from('proactive_spoken')
+        .upsert({ owner_id: a.owner_id, key: `approval-nudge:${a.id}`, channel: 'owner' },
+          { onConflict: 'owner_id,key,channel', ignoreDuplicates: true })
+        .select('id');
+      if (!(claimed ?? []).length) continue;             // another tick already rang this one
+      await admin.from('approvals').update({ reminded_at: nowIso }).eq('id', a.id).then(() => {}, () => {});
+      await notifyOwner(admin, a.owner_id,
+        `⏳ Waiting on you: "${a.title.slice(0, 120)}" is halfway through its decision window. Nothing goes out until you decide — open the Queue.`);
+    }
+
+    // The expiry sweep: CAS on status so an in-flight human decision always wins the race.
+    const overdue = pending.filter((x) => Date.parse(x.expires_at) <= Date.parse(nowIso)).slice(0, 20);
+    for (const a of overdue) {
+      const { data: flipped } = await admin.from('approvals')
+        .update({ status: 'expired', decided_at: nowIso, decided_via: 'expiry' })
+        .eq('id', a.id).eq('status', 'pending').select('id').maybeSingle();
+      if (!flipped) continue;
+      // Per-kind cleanup (deep review): an expired mail drop's snapshot must not linger looking
+      // sendable — the same cancel the explicit reject path runs.
+      if (a.kind === 'send_mail' && a.payload?.drop_id) {
+        await admin.from('mail_drops').update({ status: 'canceled' })
+          .eq('id', a.payload.drop_id as string).in('status', ['staged', 'approved']).then(() => {}, () => {});
+      }
+      await admin.from('mind_events').insert({
+        owner_id: a.owner_id, event_type: 'note', source: 'execution',
+        subject: `An approval lapsed unanswered: "${a.title.slice(0, 120)}" expired after its decision window.`,
+        payload: { key: `approval-expired:${a.id}`, approval_id: a.id },
+      }).then(() => {}, () => {});
+    }
+  } catch { /* the clock's bookkeeping must never fail the tick */ }
+
   return json({ ok: true, ran, changed, failed });
 });
 
@@ -1676,8 +2103,9 @@ async function runAreaStudy(admin: any, order: OrderRow, nowIso: string):
   if (!niche || towns.length === 0 || !areaLabel) {
     return { line: `${order.label}: config is missing niche/towns/area — nothing to study.`, done: true, audited: 0, failed: 0 };
   }
-  const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
-  if (!placesKey) return { line: `${order.label}: GOOGLE_PLACES_API_KEY missing — study cannot search.`, done: false, audited: 0, failed: 0 };
+  // Connection-first (API manager): the study searches on the order owner's own Places key.
+  const { key: placesKey } = await connectionKey(admin, order.owner_id, 'google_places', 'GOOGLE_PLACES_API_KEY');
+  if (!placesKey) return { line: `${order.label}: Google Places isn’t connected — study cannot search. Connect it in Settings → Connections.`, done: false, audited: 0, failed: 0 };
 
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,
@@ -1782,8 +2210,9 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
   Promise<{ discovered: number; built: number; queued: number; line: string }> {
   const cfg = parseHuntConfig(order.config);
   if (!cfg) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: no config — nothing to hunt. Set it up on Win Clients.` };
-  const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
-  if (!placesKey) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: Google Places isn’t configured on the server (GOOGLE_PLACES_API_KEY missing) — nothing was hunted.` };
+  // Connection-first (API manager): the hunt discovers on the order owner's own Places key.
+  const { key: placesKey } = await connectionKey(admin, order.owner_id, 'google_places', 'GOOGLE_PLACES_API_KEY');
+  if (!placesKey) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: Google Places isn’t connected — nothing was hunted. Connect it in Settings → Connections.` };
 
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,
@@ -2572,6 +3001,7 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     title: `Pitch "${input.businessName}" → ${to}`,
     preview: `${subject}\n\n${body}${shotNote}`,
     payload, payload_hash, requested_by: 'garvis-auto',
+    expires_at: expiresAtFor('send_email', new Date().toISOString()),
   }).select('id').single();
   return apErr || !ap ? null : (ap as { id: string }).id;
 }
@@ -2588,7 +3018,48 @@ const SERVER_ACTIONS = new Set([
   'hunt_opportunities', 'watch_page', 'cadence_digest', 'record_thesis', 'check_master_switch',
   'add_reminder', 'add_contact', 'create_invoice', 'start_idea_stream', 'start_client_hunt',
   'start_content_week', 'mount_room',
+  // SW6.1 — the mechanical creative actions, ported. Every outcome is a draft or a pending
+  // approval; the send/publish machinery stays behind the Queue exactly as before.
+  'queue_social_post', 'email_segment', 'point_channel_cta', 'start_app_marketing', 'draft_episode',
+  // SW6.2 — the producer trio. Grounded research, a red-teamed plan, campaign drafts: all
+  // reviewable work product, credit-gated before the first model call.
+  'research_market', 'business_plan', 'marketing_campaign',
+  // SW6.3 — the genesis composites. Every outcome is a reviewable draft; a genesis world is
+  // never instantiated server-side (approval is the client ceremony).
+  'found_company', 'onboard_client', 'launch_vertical',
 ]);
+
+/** Browser-required steps (the forge, the Paperwork studio) the worker can never run — but it can
+ *  say so HONESTLY: the step becomes a handoff carrying its link (the same outcome the client
+ *  executor returns), never a silent blocked-on-creative stall the operator has to discover. */
+const HANDOFF_ACTIONS: Record<string, (p: Record<string, string>) => StepStatus> = {
+  build_app: (p) => ({
+    kind: 'handoff',
+    note: 'The builder is ready with this idea — waiting for your visit: generation runs in the browser workspace with the compile-verified pipeline.',
+    link: `/new?idea=${encodeURIComponent(p.idea ?? '')}`,
+  }),
+  template_document: (p) => ({
+    kind: 'handoff',
+    note: `The Paperwork studio is ready${p.world ? ` in ${p.world}'s business` : ''} — waiting for your visit: paste the sample document, extract the template, review, and Save.${p.note ? ` (${p.note.slice(0, 120)})` : ''}`,
+    link: '/garvis/webs',
+  }),
+};
+
+/** The world's best-matching chartered area for a producer (mirror of the client's resolveArea):
+ *  preferred archetypes first, else the first chartered area; none at all is a SEAM — the wake
+ *  sweep resumes the arc once the operator approves the draft that creates the areas. */
+// deno-lint-ignore no-explicit-any
+async function resolveAreaSrv(admin: any, worldId: string, preferred: string[]): Promise<{ clusterId: string; charter: Charter }> {
+  const { data } = await admin.from('knowledge_clusters')
+    .select('id, slug, charter').eq('world_id', worldId).limit(32);
+  const rows = ((data ?? []) as { id: string; charter: Charter | null }[]).filter((r) => r.charter);
+  if (!rows.length) throw { waiting: 'That business has no chartered areas yet — approve its draft on Businesses, then this continues on its own.' };
+  for (const pref of preferred) {
+    const hit = rows.find((r) => r.charter!.archetype === pref);
+    if (hit) return { clusterId: hit.id, charter: hit.charter! };
+  }
+  return { clusterId: rows[0].id, charter: rows[0].charter! };
+}
 
 // deno-lint-ignore no-explicit-any
 async function resolveWorldSrv(admin: any, ownerId: string, title: string): Promise<{ id: string; title: string } | null> {
@@ -2598,6 +3069,67 @@ async function resolveWorldSrv(admin: any, ownerId: string, title: string): Prom
   if (rows.length === 1) return rows[0];
   const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
   return exact.length === 1 ? exact[0] : null;
+}
+
+/** Instantiate a builtin template into a world (mirror of the client's instantiateWeb, minus
+ *  playbook seeding — the packs regenerate from any area's tools). Returns the world id and the
+ *  cluster ids by slug so composites (launch_vertical) can wire channels to their studio area. */
+// deno-lint-ignore no-explicit-any
+async function instantiateTemplateSrv(admin: any, ownerId: string, templateId: string, title: string): Promise<{ worldId: string; clusterIdBySlug: Map<string, string> }> {
+  const t = templateById(templateId);
+  if (!t) throw new Error(`The ${templateId} template is missing from the library.`);
+  const flat = flattenTemplate(t);
+  const { data: world, error: wErr } = await admin.from('knowledge_worlds').insert({
+    owner_id: ownerId, title, focus_slug: flat[0]?.slug ?? null,
+  }).select('id').single();
+  if (wErr || !world) throw new Error(wErr?.message ?? 'Could not create the world.');
+  const worldId = (world as { id: string }).id;
+  const clusterIdBySlug = new Map<string, string>(flat.map((n) => [n.slug, crypto.randomUUID()]));
+  const { error: clErr } = await admin.from('knowledge_clusters').insert(flat.map((n) => ({
+    id: clusterIdBySlug.get(n.slug), owner_id: ownerId, world_id: worldId,
+    parent_id: n.parentSlug ? clusterIdBySlug.get(n.parentSlug) : null,
+    slug: n.slug, title: n.title, summary: n.summary,
+    kind: n.charter.archetype === 'intel' ? 'question' : n.charter.archetype === 'studio' ? 'project' : 'topic',
+    maturity: 'spark', salience: n.depth === 0 ? 0.8 : 0.5, turn_refs: [],
+    charter: n.charter,
+  })));
+  if (clErr) throw new Error(clErr.message);
+  await admin.from('mind_events').insert({
+    owner_id: ownerId, event_type: 'note', source: 'workweb',
+    subject: `Created work web "${title}" from template ${t.id}`,
+    payload: { world_id: worldId, template: t.id },
+  }).then(() => {}, () => {});
+  return { worldId, clusterIdBySlug };
+}
+
+/** One cited episode draft for a channel — the shared inner path for the draft_episode arc step
+ *  and launch_vertical's episode one. Gates credits BEFORE the model call, records the real
+ *  spend after, and saves only a parseFactScript-validated script. */
+// deno-lint-ignore no-explicit-any
+async function draftEpisodeSrv(admin: any, ownerId: string, channel: { id: string; name: string; niche: string; persona: string; cluster_id: string | null }, topic?: string): Promise<{ title: string; warnings: string[] }> {
+  await checkCredits(admin, ownerId, 'short_script');
+  const { data: eps } = await admin.from('channel_episodes')
+    .select('title').eq('channel_id', channel.id).order('created_at', { ascending: false }).limit(20);
+  const m = modelForPlan(await getUserPlan(admin, ownerId));
+  const result = await complete([
+    { role: 'system', content: FACT_SCRIPT_SYSTEM },
+    { role: 'user', content: buildFactScriptUser({
+      niche: channel.niche || channel.name, topic: topic || undefined,
+      persona: channel.persona || undefined, targetSeconds: 75,
+      avoidTitles: ((eps ?? []) as { title: string }[]).map((e) => e.title).filter(Boolean),
+    }) },
+  ], { provider: m.provider, model: m.model, maxTokens: 3000 });
+  await spendCredits(admin, ownerId, { costUsd: result.costUsd, kind: 'short_script', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+  let rawScript: unknown = null;
+  try { rawScript = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* parseFactScript reports below */ }
+  const parsed = parseFactScript(rawScript);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  const { error: epErr } = await admin.from('channel_episodes').insert({
+    owner_id: ownerId, channel_id: channel.id, cluster_id: channel.cluster_id ?? null,
+    title: parsed.script.title, topic: topic ?? '', script: parsed.script,
+  });
+  if (epErr) throw new Error(epErr.message);
+  return { title: parsed.script.title, warnings: parsed.warnings };
 }
 
 /** One mechanical step, server-side. Mirrors the client executors' outcomes; a missing world
@@ -2726,6 +3258,240 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
         ? { kind: 'done', note: `The clock is alive — last tick ${age} min ago.`, link: '/garvis/health' }
         : { kind: 'needs_review', note: 'The heartbeat looks stale from here — check the Health page.', link: '/garvis/health' };
     }
+
+    // ---- SW6.1: the mechanical creative actions, server-side. Same shared cores, same rows,
+    // ---- same outcomes as the client executors — and NOTHING sends: every outward result is a
+    // ---- pending approval the Queue owns.
+    case 'queue_social_post': {
+      const platforms = (p.platforms ?? 'twitter').split(',').map((s) => s.trim()).filter(Boolean);
+      const text = (p.text ?? '').trim();
+      const chk = checkDraft({ text, platforms, mediaUrls: [], scheduleAt: null }, nowIso);
+      if (!chk.ok) throw new Error(chk.reason ?? 'Not sendable.');
+      const { data: post, error: postErr } = await admin.from('social_posts').insert({
+        owner_id: ownerId, world_id: null, body: text, platforms,
+        media_urls: [], scheduled_for: null, status: 'queued',
+      }).select('id').single();
+      if (postErr || !post) throw new Error(`Could not queue the post: ${postErr?.message ?? 'unknown'}`);
+      const names = platforms.map((pl) => (PLATFORM_LABEL as Record<string, string>)[pl] ?? pl).join(', ');
+      const payload = { post_row_id: (post as { id: string }).id };
+      const { data: ap, error: apErr } = await admin.from('approvals').insert({
+        owner_id: ownerId, kind: 'publish_post',
+        title: `Post to ${names}`,
+        preview: `${text.slice(0, 400)}${text.length > 400 ? '…' : ''}`,
+        payload, payload_hash: await hashPayload(payload), requested_by: 'garvis-arc',
+        expires_at: expiresAtFor('publish_post', nowIso),
+      }).select('id').single();
+      if (apErr || !ap) throw new Error(apErr?.message ?? 'Could not enqueue the approval.');
+      await admin.from('social_posts').update({ approval_id: (ap as { id: string }).id }).eq('id', (post as { id: string }).id);
+      return {
+        kind: 'needs_review',
+        note: `Post queued for ${names} unattended — approve it in the Queue and it goes out.${chk.warnings.length ? ` (${chk.warnings.join('; ')})` : ''}`,
+        link: '/garvis/queue',
+      };
+    }
+    case 'email_segment': {
+      const seg = ['all', 'new', 'contacted', 'qualified', 'customer'].includes(p.segment) ? p.segment : null;
+      if (!seg) throw new Error(`Segment must be one of all/new/contacted/qualified/customer — got "${p.segment}".`);
+      const subject = (p.subject ?? '').trim();
+      const bodyText = (p.body ?? '').trim();
+      if (!subject) throw new Error('The batch needs a subject.');
+      if (!bodyText) throw new Error('The batch needs a body.');
+      const badTokens = unknownTokens(`${subject}\n${bodyText}`);
+      if (badTokens.length > 0) {
+        throw new Error(`Unsupported merge tokens: ${badTokens.map((t) => `{{${t}}}`).join(', ')}. Only {{name}} and {{first_name}} merge — anything else would send literally.`);
+      }
+      let cq = admin.from('contacts').select('id, email, full_name, email_status').eq('owner_id', ownerId).limit(2000);
+      if (seg !== 'all') cq = cq.eq('stage', seg);
+      const { data: contacts, error: cErr } = await cq;
+      if (cErr) throw new Error(cErr.message);
+      const { recipients, excluded } = composeBatchRecipients((contacts ?? []) as { id: string; email: string | null; full_name: string | null; email_status: string | null }[]);
+      if (recipients.length === 0) {
+        throw new Error(excluded.length > 0
+          ? `Nothing sendable in that segment — all ${excluded.length} excluded (${excluded[0].reason}${excluded.length > 1 ? ', …' : ''}).`
+          : 'That segment has no contacts.');
+      }
+      const { data: batch, error: bErr } = await admin.from('outreach_batches').insert({
+        owner_id: ownerId, world_id: null, subject, body_text: bodyText, recipients, status: 'queued',
+      }).select('id').single();
+      if (bErr || !batch) throw new Error(`Could not create the batch: ${bErr?.message ?? 'unknown error'}`);
+      const payload = { batch_id: (batch as { id: string }).id, recipient_count: recipients.length };
+      const { data: ap, error: apErr } = await admin.from('approvals').insert({
+        owner_id: ownerId, kind: 'send_batch',
+        title: `Send "${subject}" to ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
+        preview: `${bodyText.slice(0, 280)}${bodyText.length > 280 ? '…' : ''}\n\nThe clock drains this under your daily cap; every recipient re-checks suppression at send time.`,
+        payload, payload_hash: await hashPayload(payload), requested_by: 'garvis-arc',
+        expires_at: expiresAtFor('send_batch', nowIso),
+      }).select('id').single();
+      if (apErr || !ap) throw new Error(apErr?.message ?? 'Could not enqueue the approval.');
+      await admin.from('outreach_batches').update({ approval_id: (ap as { id: string }).id }).eq('id', (batch as { id: string }).id);
+      return {
+        kind: 'needs_review',
+        note: `Batch staged unattended to the "${seg}" segment — ${recipients.length} recipient(s)${excluded.length ? `, ${excluded.length} excluded (suppression/bounces)` : ''}. ONE approval in the Queue releases it; nothing sends until you approve.`,
+        link: '/garvis/queue',
+      };
+    }
+    case 'point_channel_cta': {
+      const url = (p.url ?? '').trim();
+      if (!/^https?:\/\//i.test(url)) throw new Error(`"${url || '(empty)'}" is not a usable link — the CTA needs a full https:// URL.`);
+      const { data: chRows } = await admin.from('growth_channels')
+        .select('id, name').eq('owner_id', ownerId).order('created_at', { ascending: true }).limit(50);
+      const channels = (chRows ?? []) as { id: string; name: string }[];
+      if (!channels.length) throw { waiting: 'No content channel exists yet — press "Start a channel" on Channels, then this continues on its own.' };
+      const wanted = (p.channel ?? '').trim().toLowerCase();
+      const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
+      const label = (p.label ?? '').trim() || 'Learn more';
+      const { error } = await admin.from('growth_channels')
+        .update({ cta_url: url, cta_label: label, updated_at: nowIso }).eq('id', channel.id);
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `"${channel.name}" now routes its audience to ${url} ("${label}") unattended — every future episode carries it.`, link: '/garvis/channels' };
+    }
+    case 'start_app_marketing': {
+      const app = (p.app ?? '').trim();
+      if (!app) throw new Error('Which app? Name it exactly as it appears on Projects.');
+      const title = `${app.slice(0, 50)} Marketing`;
+      const { worldId } = await instantiateTemplateSrv(admin, ownerId, 'app-marketing', title);
+      return { kind: 'done', note: `"${title}" stands — the canvas IS the plan: competitor intel, SEO articles, social, video ideas, results. Later steps (and you) fill the areas.`, link: `/garvis/webs/${worldId}` };
+    }
+    case 'draft_episode': {
+      const { data: chRows } = await admin.from('growth_channels')
+        .select('id, name, niche, persona, cluster_id').eq('owner_id', ownerId)
+        .order('created_at', { ascending: true }).limit(50);
+      const channels = (chRows ?? []) as { id: string; name: string; niche: string; persona: string; cluster_id: string | null }[];
+      if (!channels.length) throw { waiting: 'No content channel exists yet — press "Start a channel" on Channels, then this continues on its own.' };
+      const wanted = (p.channel ?? '').trim().toLowerCase();
+      const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
+      const ep = await draftEpisodeSrv(admin, ownerId, channel, (p.topic ?? '').trim() || undefined);
+      const warn = ep.warnings.length ? ` (${ep.warnings[0]})` : '';
+      return { kind: 'needs_review', note: `Episode "${ep.title}" drafted for ${channel.name} unattended${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
+    }
+
+    // ---- SW6.2: the producer trio — grounded research, the red-teamed plan, campaign drafts.
+    // ---- Credit-gated BEFORE the first model call; the finished work LANDS on the area (the
+    // ---- same persistence seam the studio uses), and every outcome is reviewable, never sent.
+    case 'research_market': {
+      const w = await needWorld(p.world);
+      const area = await resolveAreaSrv(admin, w.id, ['intel']);
+      await checkCredits(admin, ownerId, 'research');
+      const res = await produceResearchSrv(admin, ownerId, w.id, area.charter);
+      await persistProducedSrv(admin, ownerId, area.clusterId, res);
+      return {
+        kind: 'done',
+        note: `${res.message}${res.grounded ? '' : ' (not grounded — set SERPER_API_KEY for cited research)'}`,
+        link: `/garvis/home/${w.id}`,
+      };
+    }
+    case 'business_plan': {
+      const w = await needWorld(p.world);
+      const area = await resolveAreaSrv(admin, w.id, ['intel', 'studio']);
+      await checkCredits(admin, ownerId, 'plan');
+      const res = await produceBusinessPlanSrv(admin, ownerId, w.id, area.charter);
+      await persistProducedSrv(admin, ownerId, area.clusterId, res);
+      return { kind: 'done', note: res.message, link: `/garvis/home/${w.id}` };
+    }
+    case 'marketing_campaign': {
+      await checkCredits(admin, ownerId, 'plan');
+      // Named business → its newest EARNED research grounds the strategy stage (mirror of the
+      // client executor; seeds never count as grounding).
+      let research: string | null = null;
+      if (p.world) {
+        const w = await needWorld(p.world);
+        const { data: clusterRows } = await admin.from('knowledge_clusters').select('id').eq('world_id', w.id);
+        const ids = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+        if (ids.length) {
+          const { data: r } = await admin.from('knowledge_artifacts')
+            .select('title, detail').in('cluster_id', ids).eq('kind', 'research')
+            .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(1);
+          const row = (r ?? [])[0] as { title: string; detail: string | null } | undefined;
+          if (row?.detail) research = `${row.title}\n${row.detail}`;
+        }
+      }
+      const res = await produceCampaignSrv(admin, ownerId, { subject: p.subject, brief: p.brief ?? null, research });
+      return {
+        kind: 'needs_review',
+        note: `Campaign drafted${research ? ' (strategy grounded in the business\'s research)' : ' (ungrounded — no research on record for it)'} — ${res.summary ?? 'review the assets and approve what should ship'}.`,
+        link: '/garvis/marketing',
+      };
+    }
+
+    // ---- SW6.3: the genesis composites. Drafts and reviewable structures only — a genesis
+    // ---- world is NEVER instantiated server-side; approval stays the operator's ceremony.
+    case 'found_company': {
+      await checkCredits(admin, ownerId, 'plan');
+      const res = await generateDraftSrv(admin, ownerId, p.intent ?? '');
+      if (!res.id || !res.draft) throw new Error(res.problems[0] ?? 'Genesis could not draft this company.');
+      return {
+        kind: 'needs_review',
+        note: `Company draft "${res.draft.title}" is ready — review its areas, money verdict and open questions, then approve to instantiate.`,
+        link: '/garvis/webs',
+      };
+    }
+    case 'onboard_client': {
+      const clientName = (p.client_name ?? '').trim();
+      const business = (p.business ?? '').trim();
+      const scope = (p.scope ?? '').trim();
+      if (!clientName || !business || !scope) throw new Error('Client name, their business, and your scope are all required.');
+      const intake = intakeFor(scope);
+      // Engagement FIRST and unconditionally — a failed world draft never loses the client record.
+      const { data: eng, error: engErr } = await admin.from('client_engagements').insert({
+        owner_id: ownerId, client_name: clientName, client_email: (p.email ?? '').trim() || null,
+        business, scope, status: 'prospect', intake,
+      }).select('id').single();
+      if (engErr || !eng) throw new Error(`Could not open the engagement: ${engErr?.message ?? 'unknown'}`);
+      let draftProblem: string | null = null;
+      try {
+        await checkCredits(admin, ownerId, 'plan');
+        const res = await generateDraftSrv(admin, ownerId, clientWorldIntent(clientName, business, scope));
+        if (!res.id) draftProblem = res.problems[0] ?? 'The world draft could not be created.';
+      } catch (e) {
+        draftProblem = e instanceof Error ? e.message : 'The world draft could not be created.';
+      }
+      await admin.from('mind_events').insert({
+        owner_id: ownerId, event_type: 'note', source: 'client-book',
+        subject: `Opened client engagement: ${clientName} (${scope}) — ${intake.length} intake item(s)${draftProblem ? '; world draft failed' : '; world draft ready for review'}`,
+        payload: { engagement_id: (eng as { id: string }).id, scope },
+      }).then(() => {}, () => {});
+      return {
+        kind: 'needs_review',
+        note: `Engagement for ${clientName} opened — ${intake.length} intake item(s) to collect.${draftProblem ? ` Their world draft failed (${draftProblem}) — re-run it from Businesses.` : ' Their business draft is ready: approve it on Businesses, then link it in the Client book.'}`,
+        link: '/garvis/client-book',
+      };
+    }
+    case 'launch_vertical': {
+      const name = (p.name ?? '').trim();
+      const niche = (p.niche ?? '').trim();
+      if (!name || !niche) throw new Error('A vertical needs a channel name and a niche in plain words.');
+      const lib = VERTICAL_LIBRARY.find((v) => v.libId === (p.vertical ?? '').trim()) ?? null;
+      // One WORLD per vertical on the content-channel pattern — the channel lives where channels
+      // live, so every downstream surface (studio, pulse, learning loop) works unchanged.
+      const { worldId, clusterIdBySlug } = await instantiateTemplateSrv(admin, ownerId, 'content-channel', name);
+      const { data: ch, error: chErr } = await admin.from('growth_channels').insert({
+        owner_id: ownerId, world_id: worldId, cluster_id: clusterIdBySlug.get('growth-studio') ?? null,
+        name, niche, persona: lib?.persona ?? 'clear, cited, no hype',
+        platforms: ['tiktok', 'youtube', 'instagram'],
+        visual_style: lib?.visualStyle ?? 'clean caption cards', voice: lib?.voice ?? 'nova', music_mood: lib?.mood ?? 'minimal',
+      }).select('id, name, niche, persona, cluster_id').single();
+      if (chErr || !ch) throw new Error(`Could not create the channel: ${chErr?.message ?? 'unknown'}`);
+      const channel = ch as { id: string; name: string; niche: string; persona: string; cluster_id: string | null };
+      const url = (p.cta_url ?? '').trim();
+      if (/^https?:\/\//i.test(url)) {
+        await admin.from('growth_channels').update({ cta_url: url, cta_label: (p.cta_label ?? '').trim() || 'Learn more', updated_at: nowIso }).eq('id', channel.id);
+      }
+      // The daily clock — fail-soft, armable later from the studio (same as the client).
+      await admin.from('standing_orders').insert({
+        owner_id: ownerId, world_id: worldId, status: 'active', anchor_at: nowIso, next_run_at: nowIso,
+        kind: 'episode_draft', label: `${name} — daily episode draft`, cadence: 'daily', config: { channel_id: channel.id },
+      }).then(() => {}, () => {});
+      // Episode one: best-effort — with no AI key or credits the channel still STANDS and the
+      // daily clock drafts once it can. The note tells the truth either way.
+      try {
+        const ep = await draftEpisodeSrv(admin, ownerId, channel, (p.first_topic ?? '').trim() || undefined);
+        return { kind: 'needs_review', note: `"${name}" is live: world + channel + ${url ? 'CTA wired' : 'CTA open'} + daily clock. Episode one "${ep.title}" is drafted — review, produce, approve.`, link: `/garvis/webs/${worldId}` };
+      } catch (e) {
+        const why = e instanceof Error ? e.message : 'drafting is unavailable';
+        return { kind: 'done', note: `"${name}" is live: world + channel + ${url ? 'CTA wired' : 'CTA open'} + daily clock armed. Episode one waits (${why}) — the clock drafts as soon as the AI key is set.`, link: `/garvis/webs/${worldId}` };
+      }
+    }
+
     default:
       throw new Error(`"${action}" is not a server-executable action.`);
   }
@@ -2746,6 +3512,7 @@ async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: str
   const steps = arc.steps;
   const statuses: StepStatus[] = steps.map((_, i) => arc.statuses?.[i] ?? { kind: 'pending', note: '' });
   let advanced = 0;
+  let handoffs = 0;
   let blockedOnCreative = false;
   const { order: topo } = orderSteps(steps);
   for (const i of topo) {
@@ -2756,15 +3523,24 @@ async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: str
       continue;
     }
     if (deps.some((a) => !stepSucceeded(statuses[a].kind))) { continue; }
+    // Browser-required steps become HONEST handoffs carrying their link (the same status the
+    // client executor returns) — the operator learns what's ready, never discovers a silent stall.
+    const handoff = HANDOFF_ACTIONS[steps[i].action];
+    if (handoff) { statuses[i] = handoff(steps[i].params); handoffs++; continue; }
     if (!SERVER_ACTIONS.has(steps[i].action)) { blockedOnCreative = true; continue; }
     try {
       statuses[i] = await execServerAction(admin, arc.owner_id, steps[i].action, steps[i].params, nowIso);
       advanced++;
     } catch (e) {
       const waiting = (e as { waiting?: string })?.waiting;
+      // A spend wall (402: kill switch, daily/monthly cap, empty balance) PARKS the step — the
+      // operator can clear it and the wake sweep resumes; burying it as failure would end the arc.
+      const spendWall = (e as { status?: number })?.status === 402;
       statuses[i] = waiting
         ? { kind: 'waiting', note: waiting }
-        : { kind: 'failed', note: e instanceof Error ? e.message : 'The step failed server-side.' };
+        : spendWall
+          ? { kind: 'waiting', note: e instanceof Error ? e.message : 'Out of credits — this step resumes when credits do.' }
+          : { kind: 'failed', note: e instanceof Error ? e.message : 'The step failed server-side.' };
     }
   }
 
@@ -2778,11 +3554,17 @@ async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: str
     last_activity_at: nowIso, updated_at: nowIso, claimed_until: null,
   }).eq('id', arc.id);
 
-  if (advanced > 0) {
+  if (advanced > 0 || handoffs > 0) {
+    // Honest verbs: executed steps are "executed"; a handoff only STAGED a link — never claim
+    // the worker did browser work it cannot do.
+    const didParts = [
+      advanced > 0 ? `${advanced} step(s) executed unattended` : '',
+      handoffs > 0 ? `${handoffs} browser step(s) staged as handoffs with links` : '',
+    ].filter(Boolean).join(', ');
     await admin.from('mind_events').insert({
       owner_id: arc.owner_id, event_type: 'note', source: 'orchestrator',
-      subject: `⚙ Arc "${String(arc.title).slice(0, 100)}": ${advanced} step(s) executed unattended${status === 'done' ? ' — the arc is DONE' : blockedOnCreative ? ' — creative steps wait for your next visit' : ''}.`,
-      payload: { key: `arc-advance:${arc.id}:${nowIso.slice(0, 13)}`, plan_id: arc.id, advanced },
+      subject: `⚙ Arc "${String(arc.title).slice(0, 100)}": ${didParts}${status === 'done' ? ' — the arc is DONE' : blockedOnCreative ? ' — creative steps wait for your next visit' : ''}.`,
+      payload: { key: `arc-advance:${arc.id}:${nowIso.slice(0, 13)}`, plan_id: arc.id, advanced, handoffs },
     }).then(() => {}, () => {});
   }
 }

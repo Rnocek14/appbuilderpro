@@ -8,7 +8,7 @@
 // State survives navigation via sessionStorage because AppShell remounts per page.
 
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
   aliasKey, aliasLookup, aliasRemember, deriveWorldTasks, exploreDive, isAboutOpenThing, isBrief, isGoBack, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
@@ -25,7 +25,7 @@ import { lookDue, markLooked } from '../lib/garvis/proactiveRun';
 import { dockDeference, opensOnArrival, showsScrollback } from '../lib/garvis/dockPresence';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
-import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
+import { speakChunked, bargeIn, stopSpeaking } from '../lib/garvis/speakRun';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
 import { actionById } from '../lib/garvis/actionRegistry';
@@ -109,6 +109,16 @@ interface DoState {
 
 export function ConciergeDock() {
   const navigate = useNavigate();
+  // THE LINE (SW10.9): on the Field, this same dock — same brain, same command_messages thread —
+  // dresses as the centered Line instead of the corner bubble. It is the SAME component either
+  // way, so touching an orb morphs to that world's surface with the Line persisting as the
+  // corner dock: two dressings, one conversation (the thread + open-state survive the
+  // transition via command_messages and sessionStorage), nothing forked.
+  const { pathname } = useLocation();
+  const lineMode = pathname === '/garvis/field';
+  // The commander's posture (SW4.1) dresses the Line: think/create/execute/observe each tint the
+  // frame, so the operator can SEE what mode the last utterance put Garvis in.
+  const [posture, setPosture] = useState<'think' | 'create' | 'execute' | 'observe' | null>(null);
   // WHERE THE DOCK IS A GUEST. Two surfaces already have a conversation: the command page shows
   // this very transcript, and a project workspace has the builder chat. The dock stays available
   // on both and stops competing — no second copy of the same conversation, and no second chat box
@@ -387,9 +397,10 @@ export function ConciergeDock() {
       window.speechSynthesis.speak(u);
     } catch { /* voice is best-effort */ }
   };
+  // SW8.4: chunked — sentence 1 starts at one sentence's latency, the rest prefetch and queue.
   const speak = (text: string) => {
     if (!voiceOn || !text) return;
-    void speakEleven(text).then((ok) => { if (!ok) browserSpeak(text); });
+    void speakChunked(text).then((ok) => { if (!ok) browserSpeak(text); });
   };
   const toggleVoice = () => {
     const next = !voiceOn;
@@ -500,6 +511,7 @@ export function ConciergeDock() {
    * studio area) — the cheap router then gets its shot instead of the operator getting a guess.
    */
   const runDockAction = async (a: DockAction, sentence: string, worlds: ConciergeWorld[]): Promise<boolean> => {
+    if (a.posture) setPosture(a.posture);
     if (a.kind === 'say') {
       tell(a.text);
       speak(a.text);
@@ -539,6 +551,7 @@ export function ConciergeDock() {
 
   const askBrain = async (sentence: string, worlds: ConciergeWorld[]) => {
     setBusy(true);
+    setPosture(null); // a fresh utterance clears the old verb's tint until the brain answers
     setSuggestions([]);
     setCompound(false);
     setNote('Thinking…');
@@ -911,6 +924,7 @@ export function ConciergeDock() {
     rec.onerror = () => setListening(false);
     recRef.current = rec;
     setListening(true);
+    bargeIn();   // mic activation takes the floor too (SW8.4)
     rec.start();
   };
 
@@ -919,13 +933,19 @@ export function ConciergeDock() {
 
   if (!open) {
     return (
-      <button ref={(el) => { rootRef.current = el; }} onPointerDown={startDrag}
+      <button ref={(el) => { rootRef.current = el; }} onPointerDown={lineMode ? undefined : startDrag}
         onClick={() => { if (justDragged.current) return; setOpen(true); }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setOpen(true); } }}
         aria-label="Open the concierge — say what you want to do (drag to move it)"
-        style={posStyle}
-        className="fixed bottom-4 right-4 z-[80] flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
-        <MessageCircle size={19} />
+        style={lineMode ? undefined : posStyle}
+        className={cn(
+          'fixed z-[80] border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105',
+          lineMode
+            // The Line, at rest: the Field's ONE primary element, centered under the orbs.
+            ? 'bottom-6 left-1/2 flex h-11 w-[min(92vw,480px)] -translate-x-1/2 items-center justify-center gap-2 rounded-full text-sm'
+            : 'bottom-4 right-4 flex h-11 w-11 items-center justify-center rounded-full',
+        )}>
+        <MessageCircle size={19} />{lineMode ? <span>Say what you want to do</span> : null}
       </button>
     );
   }
@@ -933,17 +953,28 @@ export function ConciergeDock() {
   const moves = rankMoves(surfaceSuggestions(), tapsRef.current);
   const scrollback = dockScrollback(thread);
 
+  // The posture tint (SW10.9): the frame quietly says which VERB the last utterance resolved to.
+  const postureTint: Record<string, string> = {
+    think: 'border-sky-500/50', create: 'border-forge-ember/60',
+    execute: 'border-emerald-500/50', observe: 'border-violet-500/50',
+  };
+
   return (
-    <div ref={(el) => { rootRef.current = el; }} style={posStyle}
+    <div ref={(el) => { rootRef.current = el; }} style={lineMode ? undefined : posStyle}
+      data-posture={posture ?? undefined}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={() => setDropping(false)}
       onDrop={(e) => { e.preventDefault(); setDropping(false); void handleFiles(e.dataTransfer.files); }}
       // z-[80]: ABOVE the studio sheets (Overlay z=70), below toasts (z-100). The concierge is
       // the control — a scrim must never dim it or eat its clicks while it is driving the sheet.
-      className={cn('fixed bottom-4 right-4 z-[80] w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+      className={cn('fixed z-[80] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+        lineMode
+          ? 'bottom-6 left-1/2 w-[min(92vw,560px)] -translate-x-1/2'
+          : 'bottom-4 right-4 w-[340px] max-w-[calc(100vw-2rem)]',
+        posture ? postureTint[posture] : undefined,
         dropping && 'border-forge-ember/70 ring-2 ring-forge-ember/40')}>
       <div className="flex items-center gap-2">
-        <button onPointerDown={startDrag} onDoubleClick={redock}
+        <button onPointerDown={lineMode ? undefined : startDrag} onDoubleClick={lineMode ? undefined : redock}
           aria-label="Move the concierge — drag it anywhere; double-click to send it back to the corner"
           title="Drag to move · double-click to re-dock"
           className="-ml-1 cursor-grab touch-none rounded p-0.5 text-forge-dim hover:text-forge-ink active:cursor-grabbing">
@@ -986,7 +1017,12 @@ export function ConciergeDock() {
       )}
 
       <div className="mt-2 flex gap-1.5">
-        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
+        <input ref={inputRef} value={input} onChange={(e) => {
+          // BARGE-IN (SW8.4): the first keystroke takes the floor — speech stops instantly.
+          bargeIn();
+          try { window.speechSynthesis?.cancel(); } catch { /* fine */ }
+          setInput(e.target.value);
+        }}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
           onPaste={(e) => {
             // A pasted IMAGE (screenshot, copied photo) lands on the work like a drop does.

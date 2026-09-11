@@ -1,5 +1,20 @@
 # Garvis — Master System Audit (all-in-one readiness)
 
+> **STATUS (Aug 14, 2026): HISTORICAL — three pillar claims below are overtaken by shipped
+> code.** Read the pillar table with these corrections:
+> - **Build:** "the approval queue has no deploy executor" is FALSE now — approved deploys
+>   execute (`src/lib/garvis/deployRun.ts` → `execution.ts` `executeSiteDeploy` →
+>   `supabase/functions/deploy-site/`, per `garvis-deploy-executor.md`).
+> - **Videos:** "Scripts only — no render pipeline" is FALSE now — `render-video`,
+>   `shot-worker`, and `tts-voiceover` render real mp4s with voiceover; `storyboard.ts`
+>   carries a soundtrack.
+> - **Documents:** "No PDF ingest (throws 'coming')" is FALSE now — `ingest-document`
+>   ingests PDF/DOCX.
+> - The "✅ Ops inbox (`/garvis/inbox`)" shipped-claim is a dead route: it redirects to
+>   `/garvis/queue` (`src/App.tsx`).
+> The still-open items in this audit's roadmap that remain real are tracked in
+> `garvis-best-in-class-plan.md` (the operative plan) — data export/account deletion among them.
+
 *Method: the built app was driven route-by-route in a real headless browser (every `/garvis/*`
 page + builder pages rendered honestly — no crashes, no stuck spinners; unconfigured shows the
 "Supabase isn't configured" banner, which is the correct degradation). Four deep code-path audits

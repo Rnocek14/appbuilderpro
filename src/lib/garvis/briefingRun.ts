@@ -77,7 +77,29 @@ export async function gatherBriefing(): Promise<BriefingFacts> {
   const channels = countOf(supabase.from('growth_channels')
     .select('id', { count: 'exact', head: true }));
 
-  const [eps, opps, arcRes, appr, clk, chan] = await Promise.all([episodes, opportunities, arcs, approvals, clocks, channels]);
+  // The prediction record (SW7.2): CLOSED decisions with a recorded verdict, straight through
+  // the verified decisionHitRate reducer. Fail-soft like every probe.
+  const predictions = (async (): Promise<BriefingFacts['predictions']> => {
+    const { data, error } = await supabase.from('mind_decisions')
+      .select('outcome, outcome_hit').not('outcome', 'is', null).limit(500);
+    if (error) return null;
+    const { decisionHitRate } = await import('./mind');
+    const r = decisionHitRate((data ?? []) as { outcome: string | null; outcome_hit: boolean | null }[]);
+    return { closed: r.closed, hits: r.hits };
+  })().catch(() => null);
+
+  // The overnight read (SW8.2): today's accepted synthesis from the pulse, if one exists.
+  const read = (async (): Promise<BriefingFacts['read']> => {
+    const t = new Date();
+    const dayStart = new Date(t.getFullYear(), t.getMonth(), t.getDate()).toISOString();
+    const { data, error } = await supabase.from('mind_events').select('subject')
+      .eq('source', 'overnight-read').gte('created_at', dayStart)
+      .order('created_at', { ascending: false }).limit(1);
+    if (error) return null;
+    return ((data ?? [])[0] as { subject?: string | null } | undefined)?.subject ?? null;
+  })().catch(() => null);
+
+  const [eps, opps, arcRes, appr, clk, chan, preds, rd] = await Promise.all([episodes, opportunities, arcs, approvals, clocks, channels, predictions, read]);
   return {
     hour: new Date().getHours(),
     sinceHours,
@@ -88,5 +110,7 @@ export async function gatherBriefing(): Promise<BriefingFacts> {
     approvals: appr,
     clocks: clk,
     channels: chan,
+    predictions: preds,
+    read: rd,
   };
 }

@@ -28,13 +28,16 @@ import {
   type VideoMaterials,
 } from '../../../lib/garvis/videoRun';
 import {
-  listTerritories, createTerritory, importRecipients, listRecipients, loadDoNotMailKeys, type TerritoryRow,
+  listTerritories, createTerritory, importRecipients, listRecipients, loadDoNotMailKeys,
+  verifyStats, runVerification, type TerritoryRow, type VerifyStats,
 } from '../../../lib/garvis/farmRun';
 import { parseFarmCsv, partitionMailable, farmMath, farmCsv, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
+import { verifyCostLine } from '../../../lib/garvis/lobCore';
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { listingChoices, listingFill, choiceLabel } from '../../../lib/garvis/mlsToCampaign';
 import { supabase } from '../../../lib/supabase';
 import { EmailBoard } from './EmailBoard';
+import { EmailFlowsPanel } from '../EmailFlowsPanel';
 import { BrandBoard } from './BrandBoard';
 import { MerchBoard } from './MerchBoard';
 import { PostcardBoard } from './PostcardBoard';
@@ -49,7 +52,7 @@ import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
-type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding' | 'merch';
+type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding' | 'merch' | 'flows';
 
 // The brand ember, as a concrete value for the JS-side rendering paths (postcard designer, video
 // storyboard, image prompts) that can't read the --gv-ember CSS token. Kept in lockstep with it.
@@ -117,6 +120,7 @@ export function MarketingCanvas({ worldId, realEstate = false, initialArea = nul
     { key: 'social', emoji: '📱', label: 'Social posts', sub: 'post ideas', dim: false },
     { key: 'email', emoji: '✉️', label: 'Email', sub: 'ideas + examples', dim: false },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
+    { key: 'flows', emoji: '🔁', label: 'Email flows', sub: 'follow-ups on autopilot' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
     { key: 'branding', emoji: '🎨', label: 'Branding', sub: 'logo concepts' },
@@ -182,6 +186,11 @@ export function MarketingCanvas({ worldId, realEstate = false, initialArea = nul
       )}
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
+      )}
+      {open === 'flows' && (
+        <Sheet emoji="🔁" title="Email flows" lead="Behavioral follow-ups from your real email events — every step lands in your Queue as one approval; a reply ends that contact's drip." onClose={() => setOpen(null)}>
+          <EmailFlowsPanel worldId={worldId} onToast={onToast} />
+        </Sheet>
       )}
       {open === 'video' && (
         <VideoSheet worldId={worldId} clusterId={targetCluster}
@@ -403,6 +412,7 @@ function PeopleSheet({ realEstate, worldId, onToast, onClose }: { realEstate: bo
   const [newName, setNewName] = useState('');
   const [recips, setRecips] = useState<FarmRecipient[] | null>(null);
   const [dnm, setDnm] = useState<ReadonlySet<string>>(new Set());
+  const [vstats, setVstats] = useState<VerifyStats | null>(null);
   const [parsed, setParsed] = useState<FarmParseResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [piece, setPiece] = useState('0.73');
@@ -417,8 +427,20 @@ function PeopleSheet({ realEstate, worldId, onToast, onClose }: { realEstate: bo
   }, [worldId]);
 
   const selectTerr = async (t: TerritoryRow) => {
-    setSel(t); setParsed(null); setRecips(null);
+    setSel(t); setParsed(null); setRecips(null); setVstats(null);
     try { setRecips(await listRecipients(t.id)); } catch { setRecips([]); }
+    try { setVstats(await verifyStats(t.id)); } catch { /* counts are an upgrade, never a blocker */ }
+  };
+  const doVerify = async () => {
+    if (!sel) return;
+    setBusy(true);
+    try {
+      const r = await runVerification(sel.id);
+      onToast('success', `Checked: ${r.verified} verified, ${r.undeliverable} undeliverable${r.errors ? `, ${r.errors} lookup error${r.errors === 1 ? '' : 's'} (left unverified)` : ''}${r.remaining ? ` — ${r.remaining.toLocaleString()} still to check` : ''}.`);
+      setRecips(await listRecipients(sel.id));
+      setVstats(await verifyStats(sel.id));
+    } catch (e) { onToast('error', emsg(e)); }
+    finally { setBusy(false); }
   };
   const createT = async () => {
     if (!newName.trim()) return;
@@ -462,7 +484,19 @@ function PeopleSheet({ realEstate, worldId, onToast, onClose }: { realEstate: bo
         <>
           <div className="mkc-reach">
             <div className="mkc-reachbig"><b>{reach ? reach.mailable.length.toLocaleString() : '—'}</b> will get mail</div>
-            <div className="mkc-reachsub">{homes.toLocaleString()} household{homes === 1 ? '' : 's'} · {absentee.toLocaleString()} absentee{reach && reach.suppressed.length ? ` · ${reach.suppressed.length} held back (do-not-mail / incomplete address)` : ''}</div>
+            <div className="mkc-reachsub">{homes.toLocaleString()} household{homes === 1 ? '' : 's'} · {absentee.toLocaleString()} absentee{reach && reach.suppressed.length ? ` · ${reach.suppressed.length} held back (do-not-mail / undeliverable / incomplete address)` : ''}</div>
+            {vstats && (
+              <div className="mkc-reachsub">
+                Addresses checked: {vstats.verified.toLocaleString()} verified · {vstats.undeliverable.toLocaleString()} undeliverable · {vstats.unverified.toLocaleString()} unverified
+                {vstats.unverified > 0 && (
+                  <button className="mkc-spin" style={{ marginLeft: 8 }} disabled={busy}
+                    title="Runs Lob USPS verification on unverified addresses. Errors leave addresses unverified — never guessed."
+                    onClick={() => void doVerify()}>
+                    ✓ Verify ({verifyCostLine(vstats.unverified)})
+                  </button>
+                )}
+              </div>
+            )}
             {reach && reach.mailable.length > 0 && (
               <button className="mkc-spin" style={{ marginTop: 8 }} title="The addressed list a print vendor needs — do-not-mail and incomplete addresses already excluded"
                 onClick={() => {

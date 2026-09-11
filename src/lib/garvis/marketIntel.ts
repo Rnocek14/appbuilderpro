@@ -6,7 +6,7 @@
 // (strong/possible/weak + a grounded reason) — never an invented score. Contacting anyone stays
 // behind contacts + the approval spine.
 
-import type { WorldDNA, BusinessContext } from './genesis';
+import type { WorldDNA, BusinessContext } from './genesis.ts';
 
 export interface ScanCategory { name: string; queries: string[] }
 export interface ResearchPlan { categories: ScanCategory[]; trendQuestions: string[] }

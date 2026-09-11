@@ -69,6 +69,12 @@ the $19-vs-$49 pricing page contradiction only matters if FableForge is ever sol
 5. **Kill the fork.** Delete or thin-out `generate-app/index.ts` so every build goes through the
    good pipeline regardless of environment.
 
+> **TRUTH PASS (Aug 14, 2026):** P1.1 `edit_file` and P1.3 `grep` shipped
+> (`src/lib/agent/tools.ts`); P1.2 `see_preview` is still open and is now planned as
+> best-in-class-plan SW9.6. P2 (compare view / share links) → **DEFERRED**, revisit after
+> that plan's SW10. P3.2 ship→market seam → **BUILD** (SW5.5). P3.4 custom domains shipped
+> (`connect-domain`). The P3.1 room merges are SW2.6/2.7 of the same plan.
+
 ### P1 — Sharpen the agent (multiplies everything downstream)
 
 1. **`edit_file` (string-replace patches)** — whole-file rewrites are the top cost/latency/

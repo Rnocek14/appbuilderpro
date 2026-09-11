@@ -17,21 +17,28 @@ export async function fnError(error: unknown): Promise<string> {
 
 export function useConnections() {
   const [connections, setConnections] = useState<Connection[]>([]);
+  // Which service keys the PLATFORM has configured (booleans from the `status` action — values
+  // never reach the browser). Lets the hub say "running on the platform key" honestly.
+  const [platform, setPlatform] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.functions.invoke<{ connections?: Connection[] }>('connections', { body: { action: 'list' } });
-      setConnections(data?.connections ?? []);
+      const [list, status] = await Promise.all([
+        supabase.functions.invoke<{ connections?: Connection[] }>('connections', { body: { action: 'list' } }),
+        supabase.functions.invoke<{ platform?: Record<string, boolean> }>('connections', { body: { action: 'status' } }),
+      ]);
+      setConnections(list.data?.connections ?? []);
+      setPlatform(status.data?.platform ?? {});
     } catch { /* not deployed / offline — show as none connected */ }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const connect = useCallback(async (provider: string, token: string): Promise<string | undefined> => {
+  const connect = useCallback(async (provider: string, token: string, meta?: { from_number?: string }): Promise<string | undefined> => {
     const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string; label?: string }>(
-      'connections', { body: { action: 'connect', provider, token } });
+      'connections', { body: { action: 'connect', provider, token, ...(meta ? { meta } : {}) } });
     if (error) throw new Error(await fnError(error));
     if (data?.error) throw new Error(data.error);
     await refresh();
@@ -65,6 +72,7 @@ export function useConnections() {
 
   const isConnected = useCallback((provider: string) => connections.some((c) => c.provider === provider && c.connected), [connections]);
   const labelFor = useCallback((provider: string) => connections.find((c) => c.provider === provider)?.accountLabel ?? null, [connections]);
+  const platformHas = useCallback((provider: string) => platform[provider] === true, [platform]);
 
-  return { connections, loading, refresh, connect, startOAuth, finishOAuth, disconnect, isConnected, labelFor };
+  return { connections, loading, refresh, connect, startOAuth, finishOAuth, disconnect, isConnected, labelFor, platformHas };
 }

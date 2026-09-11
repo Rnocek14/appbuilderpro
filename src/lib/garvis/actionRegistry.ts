@@ -40,17 +40,18 @@ async function resolveWorld(title: string): Promise<{ id: string; title: string 
 }
 
 /** Find the world's best-matching chartered area for a producer (intel/studio first, else the
- *  first chartered area) — producers run against a real charter, same as a canvas click. */
-async function resolveArea(worldId: string, preferred: Archetype[]): Promise<Charter> {
+ *  first chartered area) — producers run against a real charter, same as a canvas click. Returns
+ *  the cluster id too, so the produced work can LAND on the area (SW6.2 parity fix). */
+async function resolveArea(worldId: string, preferred: Archetype[]): Promise<{ clusterId: string; charter: Charter }> {
   const { data } = await supabase.from('knowledge_clusters')
-    .select('slug, charter').eq('world_id', worldId).limit(32);
-  const rows = ((data ?? []) as { slug: string; charter: Charter | null }[]).filter((r) => r.charter);
+    .select('id, slug, charter').eq('world_id', worldId).limit(32);
+  const rows = ((data ?? []) as { id: string; slug: string; charter: Charter | null }[]).filter((r) => r.charter);
   if (!rows.length) throw new WaitingError('That business has no chartered areas yet — approve its draft on Businesses, then resume this arc.', { kind: 'world_area', world_id: worldId });
   for (const p of preferred) {
     const hit = rows.find((r) => r.charter!.archetype === p);
-    if (hit) return hit.charter!;
+    if (hit) return { clusterId: hit.id, charter: hit.charter! };
   }
-  return rows[0].charter!;
+  return { clusterId: rows[0].id, charter: rows[0].charter! };
 }
 
 const EXECUTORS: Record<string, ActionDef['execute']> = {
@@ -79,9 +80,13 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
 
   research_market: async (p) => {
     const w = await resolveWorld(p.world);
-    const charter = await resolveArea(w.id, ['intel']);
+    const area = await resolveArea(w.id, ['intel']);
     const { produceResearch } = await import('./producers');
-    const res = await produceResearch(w.id, charter);
+    const res = await produceResearch(w.id, area.charter);
+    // The finished work must LAND (SW6.2 parity fix): the arc path used to drop the artifacts
+    // the studio path persisted — the note said "researched" while the area stayed empty.
+    const { persistProduced } = await import('./workwebRun');
+    await persistProduced(area.clusterId, res);
     return {
       kind: 'done',
       note: `${res.message}${res.grounded ? '' : ' (not grounded — set SERPER_API_KEY for cited research)'}`,
@@ -91,9 +96,11 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
 
   business_plan: async (p) => {
     const w = await resolveWorld(p.world);
-    const charter = await resolveArea(w.id, ['intel', 'studio']);
+    const area = await resolveArea(w.id, ['intel', 'studio']);
     const { produceBusinessPlan } = await import('./producers');
-    const res = await produceBusinessPlan(w.id, charter);
+    const res = await produceBusinessPlan(w.id, area.charter);
+    const { persistProduced } = await import('./workwebRun');
+    await persistProduced(area.clusterId, res);
     return { kind: 'done', note: res.message, link: `/garvis/home/${w.id}` };
   },
 

@@ -12,6 +12,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
@@ -95,7 +96,7 @@ Deno.serve(async (req) => {
       if (!msg) { skipped++; continue; }
       // Earned autonomy (app_0097): a granted 'invoice_chase' class self-approves under its
       // daily cap and executes through the one send path. Otherwise: pending, as ever.
-      const auto = await autonomyAllowed(admin, inv.owner_id, 'invoice_chase');
+      const auto = await autonomyAllowed(admin, inv.owner_id, 'invoice_chase', { kind: 'send_email', recipientKnown: true, amountUsd: Number(inv.amount_usd) });
       const apPayload: Record<string, unknown> = { message_id: msg.id, invoice_id: inv.id, chase_stage: stage };
       if (auto) apPayload.autonomy_class = 'invoice_chase';
       const { data: apRow } = await admin.from('approvals').insert({
@@ -106,6 +107,7 @@ Deno.serve(async (req) => {
         title: `${['', 'Reminder', 'Due note', 'Past-due follow-up', 'Final notice'][stage]} for ${inv.number} → ${inv.to_email}`,
         preview: `${copy.subject}\n\n${copy.body.slice(0, 400)}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
       }).select('id').single();
       if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       await admin.from('invoices').update({ last_chase_stage: stage, updated_at: now.toISOString() }).eq('id', inv.id);

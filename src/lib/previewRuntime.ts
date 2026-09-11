@@ -16,10 +16,11 @@ export interface PreviewSnapshot {
   error: string | null;     // current uncaught error / unhandled rejection, if any
   logs: PreviewLog[];       // recent console output (capped)
   dom: string | null;       // visible text outline of what's currently rendered
+  qaHtml: string | null;    // serialized document HTML (capped by the shim) for the runtime QA scanners
   updatedAt: number;        // ms epoch of the last update (0 = never)
 }
 
-const empty: PreviewSnapshot = { route: null, title: null, error: null, logs: [], dom: null, updatedAt: 0 };
+const empty: PreviewSnapshot = { route: null, title: null, error: null, logs: [], dom: null, qaHtml: null, updatedAt: 0 };
 let snapshot: PreviewSnapshot = empty;
 const listeners = new Set<() => void>();
 
@@ -57,6 +58,21 @@ export function registerScreenshotCapture(fn: CaptureFn | null): void { captureF
 export async function captureScreenshot(): Promise<string | null> {
   if (!captureFn) return null;
   try { return await captureFn(); } catch { return null; }
+}
+
+// --- Navigation (the render probe's steering wheel, SW3.3) -------------------
+// Whichever pane hosts the live iframe registers a navigator (the screenshot pattern);
+// the probe drives routes through it. No pane registered = no live preview = the probe
+// reports an honest not-ran instead of inventing a walk.
+type NavigateFn = (route: string) => void;
+let navigateFn: NavigateFn | null = null;
+
+export function registerPreviewNavigator(fn: NavigateFn | null): void { navigateFn = fn; }
+
+/** Ask the live preview to navigate. False when no preview is mounted to drive. */
+export function navigatePreview(route: string): boolean {
+  if (!navigateFn) return false;
+  try { navigateFn(route); return true; } catch { return false; }
 }
 
 const MAX_LOG_LINES = 40;

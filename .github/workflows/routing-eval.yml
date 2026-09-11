@@ -1,0 +1,67 @@
+# Live routing eval — grades the REAL compiler model on the full ROUTING_CASES table (the
+# deterministic contract half runs in ci.yml as verify:orchestratorcases on every push).
+# Needs: secret ANTHROPIC_API_KEY, repo variable HEADLESS_MODEL. Skips with a notice when the key
+# is absent — never a red X for missing setup.
+
+name: Routing Eval
+
+on:
+  workflow_dispatch:
+  # workflow_dispatch/schedule only register once this file reaches the default branch — until
+  # then, touching .github/triggers/routing-eval and pushing fires a run from this branch.
+  push:
+    branches: [claude/garvis-system-app-manager-0rcrae]
+    paths: ['.github/triggers/routing-eval']
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays 09:00 UTC — a weekly answer to "does the router still read us right?"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      HEADLESS_MODEL: ${{ vars.HEADLESS_MODEL }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF || 'aobrsurgymnyxifoqfpu' }}
+    steps:
+      - name: Check setup
+        id: setup
+        run: |
+          # No repo secret? The app is a source of truth too — pull the key pasted in
+          # Settings → Connections via the management token CI already holds.
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -n "$SUPABASE_ACCESS_TOKEN" ]; then
+            body=$(jq -n '{query: "select access_token from provider_connections where provider = '\''anthropic'\'' limit 1"}')
+            key=$(curl -sf -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+              -d "$body" | jq -r '.[0].access_token // empty' || true)
+            if [ -n "$key" ]; then
+              echo "::add-mask::$key"
+              echo "ANTHROPIC_API_KEY=$key" >> "$GITHUB_ENV"
+              echo "Using the Anthropic key pasted in the app."
+            fi
+          fi
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$key" ]; then
+            echo "::notice::No Anthropic key found (repo secret or app Settings → Connections) — skipping the live eval (the contract suite still runs in CI)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$HEADLESS_MODEL" ]; then
+            echo "::notice::HEADLESS_MODEL repo variable is not set — the model id is configuration; skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.setup.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.setup.outputs.ready == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+        if: steps.setup.outputs.ready == 'true'
+
+      - name: Run the live routing eval
+        if: steps.setup.outputs.ready == 'true'
+        run: npx tsx scripts/routingEvalRun.ts

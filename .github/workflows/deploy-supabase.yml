@@ -261,13 +261,22 @@ jobs:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          LOB_API_KEY: ${{ secrets.LOB_API_KEY }}
+          LOB_WEBHOOK_SECRET: ${{ secrets.LOB_WEBHOOK_SECRET }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          STRIPE_PRO_PRICE_ID: ${{ secrets.STRIPE_PRO_PRICE_ID }}
+          STRIPE_CREDITS_PRICE_ID: ${{ secrets.STRIPE_CREDITS_PRICE_ID }}
         run: |
           set -e
           synced=""
           for name in ANTHROPIC_API_KEY OPENAI_API_KEY WORKER_SECRET CRON_SECRET \
                       GOOGLE_PLACES_API_KEY APP_ORIGIN RESEND_API_KEY RESEND_WEBHOOK_SECRET \
                       INBOUND_SECRET AI_PROVIDER AI_MODEL EMBEDDINGS_API_KEY \
-                      SCREENSHOT_API_KEY TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_NUMBER; do
+                      SCREENSHOT_API_KEY TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_NUMBER \
+                      LOB_API_KEY LOB_WEBHOOK_SECRET NETLIFY_AUTH_TOKEN \
+                      STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PRO_PRICE_ID STRIPE_CREDITS_PRICE_ID; do
             val="${!name}"
             if [ -n "$val" ]; then
               supabase secrets set "$name=$val" --project-ref "$PROJECT_REF" >/dev/null
@@ -275,6 +284,30 @@ jobs:
             fi
           done
           echo "Synced:${synced:- (none provided as repo secrets)}"
+
+      # The app is a source of truth too: a key pasted in Settings → Connections (sealed in
+      # provider_connections) reaches the fleet here. Names only in logs, values masked.
+      # Single-operator read, deliberately — the platform key belongs to the platform owner.
+      - name: Sync keys pasted in the app
+        env:
+          ANTHROPIC_FROM_REPO: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -e
+          if [ -n "$ANTHROPIC_FROM_REPO" ]; then
+            echo "ANTHROPIC_API_KEY already synced from repo secrets — the repo wins."
+            exit 0
+          fi
+          body=$(jq -n '{query: "select access_token from provider_connections where provider = '\''anthropic'\'' limit 1"}')
+          key=$(curl -sf -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+            -d "$body" | jq -r '.[0].access_token // empty')
+          if [ -z "$key" ]; then
+            echo "No Anthropic key pasted in the app yet — paste it in Settings → Connections and re-run."
+            exit 0
+          fi
+          echo "::add-mask::$key"
+          supabase secrets set "ANTHROPIC_API_KEY=$key" --project-ref "$PROJECT_REF" >/dev/null
+          echo "Synced from the app: ANTHROPIC_API_KEY"
 
       # The step everything "while you sleep" depends on: schedules the pg_cron jobs that POST
       # the workers. Uses the management API so no direct DB connection is needed from the runner.

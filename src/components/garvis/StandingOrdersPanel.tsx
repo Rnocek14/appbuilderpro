@@ -122,7 +122,11 @@ export function StandingOrdersPanel({ worldId, onToast }: {
                 {o.kind === 'watch_url' ? <Eye size={13} className="shrink-0 text-forge-cyan" /> : <CalendarClock size={13} className="shrink-0 text-forge-cyan" />}
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-forge-ink">{o.label}</span>
                 <span className="shrink-0 rounded-full border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim">{o.cadence}</span>
-                {o.status === 'paused' && <span className="shrink-0 rounded-full bg-forge-warn/15 px-1.5 py-0.5 text-[10px] text-forge-warn">paused</span>}
+                {o.status === 'paused' && (
+                  <span className="shrink-0 rounded-full bg-forge-warn/15 px-1.5 py-0.5 text-[10px] text-forge-warn">
+                    {o.lastError ? 'paused itself' : 'paused'}
+                  </span>
+                )}
                 <div className="flex shrink-0 items-center gap-1">
                   <button title="What this does" onClick={() => setInfoFor(infoFor === o.id ? null : o.id)}
                     className={`rounded border border-forge-border p-1 ${infoFor === o.id ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink'}`}>
@@ -146,6 +150,13 @@ export function StandingOrdersPanel({ worldId, onToast }: {
               <p className={`mt-1 text-[11px] ${o.lastResult?.status === 'changed' ? 'text-forge-ok' : o.lastResult?.status === 'unreachable' ? 'text-forge-warn' : 'text-forge-dim'}`}>
                 {orderStatusLine(o)}
               </p>
+              {/* Dead-letter strip (app_0140): a breaker-paused order names its reason and the
+                  way back — Resume (the play button above) clears the streak. */}
+              {o.status === 'paused' && o.lastError && (
+                <p className="mt-1 rounded border border-forge-warn/30 bg-forge-warn/10 px-2 py-1 text-[11px] text-forge-warn">
+                  Paused itself after {o.consecutiveFailures} straight failures: {o.lastError} — fix the cause, then press Resume (the counter resets).
+                </p>
+              )}
               {infoFor === o.id && <div className="mt-2"><AutomationCardView card={cardForOrderKind(o.kind)} /></div>}
             </li>
           ))}

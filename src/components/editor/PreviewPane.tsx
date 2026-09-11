@@ -3,7 +3,9 @@ import { Wand2, MousePointerClick } from 'lucide-react';
 import type { ProjectFile } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
-import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture } from '../../lib/previewRuntime';
+import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture, registerPreviewNavigator } from '../../lib/previewRuntime';
+import { QA_HTML_CAP } from '../../lib/runtimeQa';
+import { REACT_VERSION, previewPins } from '../../lib/depRegistry';
 
 export type Device = 'desktop' | 'tablet' | 'mobile';
 const DEVICE_WIDTH: Record<Device, string> = { desktop: '100%', tablet: '768px', mobile: '390px' };
@@ -45,7 +47,7 @@ const BABEL_CDNS = [
 
 interface PreviewPayload { files: Record<string, string>; css: string; externals: string[]; aliases: Record<string, string>; env: Record<string, string> }
 
-const REACT_PIN = '18.3.1';
+const REACT_PIN = REACT_VERSION;
 const REACT_FAMILY = new Set(['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime']);
 // Build-time / Node-only specifiers that must never be fetched from esm.sh.
 const NON_BROWSER = new Set([
@@ -297,8 +299,11 @@ function visibleText(){
   }catch(_){ return ''; }
 }
 function curRoute(){ try{ return location.hash||location.pathname||'/'; }catch(_){ return null; } }
+// Serialized document (capped) so the parent can run its static QA scanners over what actually
+// rendered — the whole document, because app styles live in shell-injected <style> blocks.
+function qaHtml(){ try{ return document.documentElement.outerHTML.slice(0,${QA_HTML_CAP}); }catch(_){ return null; } }
 function postSnapshot(){
-  try{ parent.postMessage({__ff:true,type:'dom',dom:visibleText(),title:document.title,route:curRoute()},'*'); }catch(_){ }
+  try{ parent.postMessage({__ff:true,type:'dom',dom:visibleText(),title:document.title,route:curRoute(),qaHtml:qaHtml()},'*'); }catch(_){ }
 }
 var __snapT=null;
 function scheduleSnapshot(){ if(__snapT)clearTimeout(__snapT); __snapT=setTimeout(postSnapshot,500); }
@@ -353,12 +358,10 @@ function loadScript(urls){
 // Copy a module namespace into a plain object with __esModule so Babel's commonjs interop
 // resolves default and named imports correctly.
 function nsToObj(ns){ const o={__esModule:true}; for(const k in ns) o[k]=ns[k]; if(ns&&ns.default!==undefined)o.default=ns.default; return o; }
-// Pin the curated deps to the versions in the scaffold's package.json so esm.sh doesn't
-// surprise us with a breaking "latest".
-const PINS={'react-router-dom':'6.26.2','recharts':'2.13.0','lucide-react':'0.453.0','@supabase/supabase-js':'2.45.4','date-fns':'4.1.0','clsx':'2.1.1',
-// Motion/3D stack — pinned to a known-compatible set so esm.sh never drifts a peer-dep and wedges
-// the preview (three<->fiber<->drei are the classic footgun). These power the advanced-motion kit.
-'framer-motion':'11.11.17','gsap':'3.12.5','lenis':'1.1.14','three':'0.169.0','@react-three/fiber':'8.17.10','@react-three/drei':'9.114.3'};
+// Pins come from the ONE dependency registry (interpolated at shell build time) so esm.sh
+// never surprises us with a breaking "latest" — and so the preview, the scaffold, and the QA
+// allowlist can never disagree about a version (verify:depregistry pins the agreement).
+const PINS=${JSON.stringify(previewPins())};
 function esmUrl(spec){
   const v=PINS[spec]?('@'+PINS[spec]):'';
   // @react-three/* MUST share the app's single pinned three instance (bundling their own copy
@@ -621,6 +624,18 @@ window.addEventListener('message',function(e){
     update(d.files||{}, d.externals||[], d.aliases||{}, d.env||{});
   } else if(d.type==='screenshot'){
     captureScreenshot();
+  } else if(d.type==='navigate'){
+    // The render probe's steering wheel: hash-route apps get a hash hop, everything else a
+    // pushState + popstate so BrowserRouter re-matches. The DOM snapshot reports on its own
+    // (MutationObserver + route listeners) once the app repaints.
+    try{
+      var r=String(d.route||'/');
+      if((location.hash&&location.hash.indexOf('#/')===0)||r.indexOf('#')===0){ location.hash=(r.indexOf('#')===0?r:'#'+r); }
+      else{ history.pushState(null,'',r); window.dispatchEvent(new PopStateEvent('popstate')); }
+      // Same-route hops fire no hashchange/mutation — snapshot unconditionally so the probe
+      // always gets a capture stamped with the route it asked for (deep review).
+      scheduleSnapshot();
+    }catch(err){}
   }
 });
 
@@ -745,7 +760,7 @@ function NativePreview({ files, device, showConsole, onFixError, busy, onSelectE
         setLogs((l) => [...l.slice(-99), { level: d.level, text }]);
         pushPreviewLog({ level: d.level, text });
       } else if (d.type === 'dom') {
-        updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null });
+        updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null, qaHtml: typeof d.qaHtml === 'string' ? d.qaHtml : null });
       } else if (d.type === 'selected') {
         setEditMode(false);
         onSelectRef.current?.({ loc: d.loc ?? '', tag: d.tag ?? '', text: d.text ?? '', className: d.className ?? '', count: d.count ?? 1 });
@@ -770,6 +785,14 @@ function NativePreview({ files, device, showConsole, onFixError, busy, onSelectE
       win.postMessage({ __ff_cmd: true, type: 'screenshot' }, '*');
     }));
     return () => registerScreenshotCapture(null);
+  }, []);
+
+  // The probe's navigator (SW3.3): registered while this pane hosts the live iframe.
+  useEffect(() => {
+    registerPreviewNavigator((route) => {
+      iframeRef.current?.contentWindow?.postMessage({ __ff_cmd: true, type: 'navigate', route }, '*');
+    });
+    return () => registerPreviewNavigator(null);
   }, []);
 
   // PAGE SELECTOR: every concrete <Route path> in the app, jumpable from a dropdown. The blob

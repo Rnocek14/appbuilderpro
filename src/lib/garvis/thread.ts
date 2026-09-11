@@ -27,8 +27,10 @@ export interface ThreadTurn {
 export const THREAD_WINDOW = 40;
 /** How much of the conversation the corner shows. Enough to see what just happened, no more. */
 export const DOCK_SCROLLBACK = 8;
-/** Turns handed to the deep brain as context. */
-export const BRAIN_WINDOW = 6;
+/** Turns handed to the deep brain as context. Raised 6 → 16 (SW2.3): the cached stable prefix
+ *  pays for the headroom, and a conversation that references "that thing from earlier" needs
+ *  the earlier to still be in the window. */
+export const BRAIN_WINDOW = 16;
 
 // Live status the corner prints while it works. It is true when shown and meaningless an hour
 // later, so it never reaches the record.

@@ -1,0 +1,61 @@
+# Security review — report-only, path-filtered to the surfaces where a bug costs money or
+# trust: the send paths, the payment webhook, the approval spine, and every migration. Runs
+# Anthropic's security-review action with its false-positive filtering on; never fails the
+# check. Same-repo PRs only — fork PRs must never reach the API key.
+name: Security Review
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/send-email/**'
+      - 'supabase/functions/send-sms/**'
+      - 'supabase/functions/sms-inbound/**'
+      - 'supabase/functions/social-publish/**'
+      - 'supabase/functions/docusign-send/**'
+      - 'supabase/functions/invoice-chase/**'
+      - 'supabase/functions/stripe-webhook/**'
+      - 'supabase/functions/deploy-site/**'
+      - 'supabase/functions/deploy-backend/**'
+      - 'supabase/functions/standing-worker/**'
+      - 'supabase/functions/garvis-line/**'
+      - 'supabase/functions/lead-ingest/**'
+      - 'supabase/functions/outreach-followups/**'
+      - 'supabase/functions/outreach-reactivate/**'
+      - 'supabase/functions/_shared/payloadHash.ts'
+      - 'supabase/functions/_shared/autonomyGate.ts'
+      - 'supabase/functions/_shared/cronGate.ts'
+      - 'supabase/functions/_shared/credits.ts'
+      - 'supabase/functions/_shared/safeFetch.ts'
+      - 'supabase/functions/_shared/untrustedText.ts'
+      - 'supabase/functions/_shared/oauth.ts'
+      - 'src/lib/garvis/execution.ts'
+      - 'src/lib/garvis/billing/**'
+      - 'supabase/migrations/**'
+
+concurrency:
+  group: security-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  security:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          comment-pr: true
+          false-positive-filtering-instructions: |
+            This repo's deliberate patterns are NOT findings:
+            - Service-role writes gated by payload-hash re-verification (the approval spine).
+            - The cron gate's shared-secret headers (x-worker-secret / x-cron-secret).
+            - Self-notifications emailed to the owner's own profiles.email (not outbound).
+            - RLS-enforced owner scoping instead of per-query auth checks in client code.

@@ -21,8 +21,8 @@ export interface SystemStatus {
 export const EXPECTED_JOBS = [
   'garvis-pulse-hourly', 'garvis-worker-tick', 'garvis-standing-tick', 'garvis-followups-daily',
   'garvis-inbox-draft-daily', 'garvis-ads-watch-daily', 'garvis-invoice-chase-daily',
-  'garvis-scorecard-weekly', 'garvis-reactivate-monthly', 'garvis-consolidate-weekly',
-  'garvis-social-sync', 'garvis-canary-nightly', 'garvis-mls-sync',
+  'garvis-scorecard-weekly', 'garvis-reactivate-monthly', 'garvis-consolidate-nightly',
+  'garvis-social-sync', 'garvis-canary-nightly', 'garvis-mls-sync', 'garvis-embed-sweep',
 ] as const;
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {

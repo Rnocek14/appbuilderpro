@@ -10,10 +10,88 @@ import Stripe from 'npm:stripe@18';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stripeClient, syncSubscription } from '../_shared/stripe.ts';
 import { notifyText } from '../_shared/notify.ts';
+import { routeCheckoutSession, isUuid } from '../_shared/stripeRouteCore.ts';
 import { saleActionOnPaid } from '../../../src/lib/garvis/billing/clientSale.ts';
 import { publishedHtmlPath } from '../../../src/lib/preview/publishCore.ts';
 
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
+
+/** The OPERATOR's own invoice paid through its Payment Link (metadata.invoice_id = our invoices
+ *  row, stamped by invoice-payment-link). Server-side mirror of the client's markInvoicePaid:
+ *  CAS draft/sent → paid (a void invoice is never resurrected; a replay is a no-op), paid_via
+ *  'stripe', pending chase approvals auto-rejected (a settled bill never gets a "final notice"),
+ *  PAID mind_event + webhook push. Returns true when the session belonged to one of our invoices. */
+// deno-lint-ignore no-explicit-any
+async function handleInvoicePaid(admin: any, session: Stripe.Checkout.Session): Promise<boolean> {
+  const invoiceId = session.metadata?.invoice_id;
+  if (!isUuid(invoiceId)) return false;
+  const { data: inv, error: lookupErr } = await admin.from('invoices')
+    .select('id, owner_id, number, title, amount_usd, status, paid_via').eq('id', invoiceId).maybeSingle();
+  // A transient DB fault must retry (throw → 500 → Stripe redelivers); a clean no-row means the
+  // invoice was deleted after the link was minted — nothing left to reconcile, fall through.
+  if (lookupErr) throw new Error(`invoice lookup failed: ${lookupErr.message}`);
+  if (!inv) return false;
+  const ownerId = inv.owner_id as string;
+  const amount = typeof session.amount_total === 'number' && session.amount_total > 0
+    ? session.amount_total / 100 : Number(inv.amount_usd);
+  const tell = async (subject: string, extra: Record<string, unknown> = {}) => {
+    await admin.from('mind_events').insert({
+      owner_id: ownerId, event_type: 'note', source: 'money',
+      subject, payload: { invoice_id: invoiceId, amount_usd: amount, paid_via: 'stripe', ...extra },
+    }).then(() => {}, () => {});
+    const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).maybeSingle();
+    await notifyText((owner as { webhook_url?: string } | null)?.webhook_url, subject);
+  };
+
+  // A FRESH event on a settled invoice is never swallowed (deep review 2026-08 #8): the event-id
+  // marker upstream already absorbed true redeliveries, so landing here means either a SECOND
+  // real payment (the link was reused) or Stripe confirming a payment the operator recorded by
+  // hand — money moved either way, and the two cases read differently.
+  if (inv.status === 'paid') {
+    if (inv.paid_via === 'stripe') {
+      await tell(`⚠ Stripe took another $${amount.toFixed(2)} for already-paid ${inv.number} — check for a double payment and refund if so.`, { duplicate: true });
+    } else {
+      // The operator marked it paid by hand; the webhook payment is almost certainly the same
+      // money arriving on record. Upgrade the provenance, note it, no alarm.
+      await admin.from('invoices').update({ paid_via: 'stripe', updated_at: new Date().toISOString() })
+        .eq('id', invoiceId).eq('status', 'paid').then(() => {}, () => {});
+      await tell(`Stripe confirmed payment for ${inv.number} — you had already marked it paid; provenance reconciled.`, { reconciled: true });
+    }
+    return true;
+  }
+
+  const { data: flipped, error: flipErr } = await admin.from('invoices')
+    .update({ status: 'paid', paid_at: new Date().toISOString(), paid_via: 'stripe', updated_at: new Date().toISOString() })
+    .eq('id', invoiceId).in('status', ['draft', 'sent']).select('id').maybeSingle();
+  if (flipErr) throw new Error(`invoice flip failed: ${flipErr.message}`);
+
+  if (flipped) {
+    // A paid invoice must not keep getting chased — reject its pending send/chase approvals.
+    await admin.from('approvals')
+      .update({ status: 'rejected', decided_at: new Date().toISOString(), decided_via: 'auto' })
+      .eq('owner_id', ownerId).eq('status', 'pending').eq('kind', 'send_email')
+      .contains('payload', { invoice_id: invoiceId })
+      .then(() => {}, () => {});
+    await tell(`PAID: ${inv.number} — ${inv.title} ($${amount.toFixed(2)})`);
+    return true;
+  }
+
+  // CAS miss: the status left draft/sent between the read and the update. RE-READ before
+  // alarming (deep review 2026-08 #9) — a concurrent manual mark-paid is NOT a void, and
+  // telling the operator to refund correctly-earned revenue is a loud, actionable lie.
+  const { data: recheck } = await admin.from('invoices').select('status').eq('id', invoiceId).maybeSingle();
+  const nowStatus = (recheck as { status?: string } | null)?.status;
+  if (nowStatus === 'paid') {
+    await admin.from('invoices').update({ paid_via: 'stripe', updated_at: new Date().toISOString() })
+      .eq('id', invoiceId).eq('status', 'paid').then(() => {}, () => {});
+    await tell(`Stripe confirmed payment for ${inv.number} — it was marked paid moments earlier; provenance reconciled.`, { reconciled: true });
+    return true;
+  }
+  // Genuinely void — the payment is real (Stripe took it), but resurrecting a written-off bill
+  // is the operator's call; the alarm makes sure it cannot go unnoticed.
+  await tell(`⚠ Stripe took $${amount.toFixed(2)} for VOIDED ${inv.number} — refund it or un-void the invoice.`);
+  return true;
+}
 
 /** A CLIENT paying the OPERATOR for their website (Payment Link, client_reference_id = our
  *  client_subscriptions id). Returns true when the session WAS a client sale (so the caller skips the
@@ -24,10 +102,10 @@ const cryptoProvider = Stripe.createSubtleCryptoProvider();
 // deno-lint-ignore no-explicit-any
 async function handleClientSale(admin: any, session: Stripe.Checkout.Session): Promise<boolean> {
   const ref = session.client_reference_id;
-  // Guard the uuid column: a non-uuid ref (a FableForge session may carry none, or a non-uuid) must
-  // NOT reach .eq('id', …) — that throws "invalid input syntax for uuid", 500s the webhook, and makes
+  // Guard the uuid column (isUuid — the route core's own guard): a non-uuid ref must NOT reach
+  // .eq('id', …) — that throws "invalid input syntax for uuid", 500s the webhook, and makes
   // Stripe retry forever. A non-uuid ref is definitively not one of our sales → let FableForge handle it.
-  if (!ref || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) return false;
+  if (!isUuid(ref)) return false;
   const { data: sub, error: lookupErr } = await admin.from('client_subscriptions')
     .select('id, owner_id, business_name, tier, preview_site_id, status, world_id').eq('id', ref).maybeSingle();
   // A REAL lookup error (transient DB fault) must retry — throw so the outer catch 500s and Stripe
@@ -169,10 +247,16 @@ Deno.serve(async (req) => {
   const sig = req.headers.get('stripe-signature') ?? '';
   const stripe = stripeClient();
 
+  // FAIL CLOSED when the signing secret is unset (deep review 2026-08 #11): HMAC with an empty
+  // key is computable by anyone, and this endpoint is public — an unset secret must mean "accept
+  // nothing", never "accept everything".
+  const whSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET');
+  if (!whSecret) return new Response('STRIPE_WEBHOOK_SECRET is not set — refusing all events until it is.', { status: 500 });
+
   let event: Stripe.Event;
   try {
     event = await stripe.webhooks.constructEventAsync(
-      body, sig, Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? '', undefined, cryptoProvider,
+      body, sig, whSecret, undefined, cryptoProvider,
     );
   } catch (e) {
     return new Response(`Bad signature: ${e instanceof Error ? e.message : e}`, { status: 401 });
@@ -193,9 +277,18 @@ Deno.serve(async (req) => {
       case 'checkout.session.async_payment_succeeded': {
         const session = event.data.object as Stripe.Checkout.Session;
         const paid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
-        // A CLIENT paying the operator (Payment Link) is intercepted FIRST — it must never fall through
-        // to the FableForge SaaS branches (a $/mo client sale is mode:'subscription' and would corrupt
-        // the operator's own plan). Only paid sessions convert a sale.
+        // THE ROUTE (pure, verified — stripeRouteCore): the OPERATOR'S OWN INVOICE is checked
+        // FIRST (metadata.invoice_id names it regardless of what rides client_reference_id),
+        // then a client sale, then the FableForge SaaS branches. Each handler returns false when
+        // the row isn't actually ours, so the fall-through stays honest.
+        const route = routeCheckoutSession({
+          paid,
+          invoiceId: session.metadata?.invoice_id ?? null,
+          clientReferenceId: session.client_reference_id ?? null,
+        });
+        if (route === 'invoice' && await handleInvoicePaid(admin, session)) break;
+        // A CLIENT paying the operator must never fall through to the SaaS branches (a $/mo
+        // client sale is mode:'subscription' and would corrupt the operator's own plan).
         if (paid && await handleClientSale(admin, session)) break;
         if (session.mode === 'payment' && paid) {
           // Credit top-up: grant once (event idempotency above protects against replays).

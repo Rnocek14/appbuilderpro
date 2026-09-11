@@ -8,7 +8,7 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectFreshDeploys, collectAdoptedStrategies, collectCrossVenture, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn, type TrailRowIn,
 } from './nextMove';
 import { listWorlds, isWorldUuid } from './universe';
@@ -265,6 +265,20 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     created_at: d.created_at as string,
   }));
 
+  // Cross-venture transfer (SW10.11): at most ONE measured move across the portfolio — started
+  // FIRST (it fans out per world, now in parallel) and awaited last, so it rides alongside the
+  // other probes instead of extending the waking moment's critical path.
+  const transferPromise = import('./crossVentureRun')
+    .then((m) => m.loadCrossVentureMove()).catch(() => null);
+
+  // Adopted strategies (SW9.2): the operator's declared way forward — fail-soft like every probe.
+  const adoptedStrategies = await supabase.from('strategies')
+    .select('id, title, world_id, created_at').eq('status', 'adopted')
+    .order('updated_at', { ascending: false }).limit(4)
+    .then(({ data }) => (data ?? []) as { id: string; title: string; world_id: string | null; created_at: string }[], () => []);
+
+  const transferMove = await transferPromise;
+
   const ranked = rankMoves([
     ...collectReminders(((remindersQ.data ?? []) as { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }[]), now),
     ...collectLeads(((leadsQ.data ?? []) as { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }[])),
@@ -281,6 +295,9 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectInsights(insights.map((i) => ({ id: i.id as string, title: i.title as string, body: i.body as string, score: Number(i.score), created_at: i.created_at as string }))),
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
+    ...collectFreshDeploys(events as { subject: string; occurred_at: string; payload: Record<string, unknown> | null }[], now.toISOString()),
+    ...collectAdoptedStrategies(adoptedStrategies),
+    ...collectCrossVenture(transferMove, now.toISOString()),
     ...collectTrails(trailRows, now),
   ], now, mergedDismissals());
 

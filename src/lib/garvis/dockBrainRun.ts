@@ -16,7 +16,7 @@ import { rawComplete } from '../aiClient';
 import { supabase } from '../supabase';
 import { COMMANDER_SYSTEM, buildCommanderUser, parseCommand } from './commander';
 import { dockActionFor, worthAsking, type DockAction } from './dockBrain';
-import { loadMindRecordContext } from './mindContextRun';
+import { loadMindRecordParts } from './mindContextRun';
 import { goalsDigest } from './goalsRun';
 import { retrieveForPrompt } from './ask';
 import { assembleSituation } from './situationRun';
@@ -31,12 +31,15 @@ export interface DockBrainInput {
   projectId?: string | null;
 }
 
-// The dock is a corner widget the operator hits all day — the context is deliberately tighter
-// than the full command page's. Enough to be grounded, not enough to make every stray question
-// expensive.
-const MIND_BUDGET = 2_500;
+// FED, NOT STARVED (SW2.3): the dock is the surface the operator hits all day, so it gets the
+// full mind — split for the prompt cache. Identity + beliefs (slow-moving) ride the cached
+// system position at ~0.1x on every consecutive ask; decisions + recent events (fast-moving)
+// stay in the user turn where fresh values never break the cached prefix. The spend guard
+// (app_0127 caps) bounds the upgrade; fail-soft to the regex router is unchanged.
+const MIND_STABLE_BUDGET = 3_500;
+const MIND_VOLATILE_BUDGET = 2_500;
 const PROJECT_BUDGET = 8_000;
-const MAX_TOKENS = 1_000;
+const MAX_TOKENS = 2_000;
 
 /** Never let one dead probe sink the call: a rejecting assembler contributes nothing. */
 const soft = (p: Promise<string>): Promise<string> => p.catch(() => '');
@@ -76,8 +79,8 @@ export async function askCommander(input: DockBrainInput): Promise<DockAction | 
   const sentence = input.sentence.trim();
   if (!worthAsking(sentence)) return null;
   try {
-    const [mind, situation, goals, knowledge, project] = await Promise.all([
-      soft(loadMindRecordContext({ budgetChars: MIND_BUDGET })),
+    const [mindParts, situation, goals, knowledge, project] = await Promise.all([
+      loadMindRecordParts({ stableBudget: MIND_STABLE_BUDGET, volatileBudget: MIND_VOLATILE_BUDGET }).catch(() => ({ stable: '', volatile: '' })),
       soft(assembleSituation()),
       soft(goalsDigest()),
       soft(retrieveForPrompt(sentence)),
@@ -88,11 +91,14 @@ export async function askCommander(input: DockBrainInput): Promise<DockAction | 
           .catch(() => '')
         : Promise.resolve(''),
     ]);
-    const context = [mind, situation, goals, knowledge, project].filter(Boolean).join('\n\n');
+    const context = [mindParts.volatile, situation, goals, knowledge, project].filter(Boolean).join('\n\n');
     const snapshot = await portfolioSnapshot(input.worlds ?? []);
 
+    // Stable prefix (system, cached): the commander's rules + who the founder is. Volatile
+    // content (this sentence, the live situation, recent events) rides the user turn.
+    const system = mindParts.stable ? `${COMMANDER_SYSTEM}\n\n${mindParts.stable}` : COMMANDER_SYSTEM;
     const r = await rawComplete([
-      { role: 'system', content: COMMANDER_SYSTEM },
+      { role: 'system', content: system },
       { role: 'user', content: buildCommanderUser(sentence, snapshot, input.history ?? [], context) },
     ], MAX_TOKENS);
     if (!r?.text?.trim()) return null;

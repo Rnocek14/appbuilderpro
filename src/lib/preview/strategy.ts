@@ -13,7 +13,7 @@
 // All model output passes through the tolerant normalizers here; deterministic fallbacks mean the
 // pipeline never dead-ends. No supabase, no model calls — unit-tested in spec.verify.ts.
 
-import type { BusinessProfile } from './spec';
+import type { BusinessProfile } from './spec.ts';
 
 // ---------------------------------------------------------------------------
 // Website strategy — the marketing brief

@@ -5,22 +5,32 @@
 // can only ever produce MORE human review, never less.
 
 /** Execute a just-minted auto-approved send through THE ONE SEND PATH (every gate re-runs
- *  there). Best-effort: a failure leaves an approved-but-unsent approval visible in the Queue. */
+ *  there). Best-effort: a failure leaves an approved-but-unsent approval visible in the Queue.
+ *  Deno reached via globalThis so the module typechecks under tsx too (the paired verify suite,
+ *  SW10.12, exercises autonomyAllowed; this function only ever runs on the edge). */
 export async function executeSendNow(approvalId: string): Promise<void> {
-  await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-email`, {
+  const denv = (globalThis as { Deno?: { env: { get(n: string): string | undefined } } }).Deno?.env;
+  if (!denv) return;
+  await fetch(`${denv.get('SUPABASE_URL')}/functions/v1/send-email`, {
     method: 'POST', signal: AbortSignal.timeout(30_000),
     headers: {
       'content-type': 'application/json',
-      'x-worker-secret': Deno.env.get('WORKER_SECRET') ?? '',
-      Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      'x-worker-secret': denv.get('WORKER_SECRET') ?? '',
+      Authorization: `Bearer ${denv.get('SUPABASE_SERVICE_ROLE_KEY')}`,
     },
     body: JSON.stringify({ approval_id: approvalId }),
   }).catch(() => {});
 }
 
+import { riskFor, riskBlocksAutonomy, type RiskFacts } from '../../../src/lib/garvis/approvalRisk.ts';
+
 // deno-lint-ignore no-explicit-any
-export async function autonomyAllowed(admin: any, ownerId: string, actionClass: string): Promise<boolean> {
+export async function autonomyAllowed(admin: any, ownerId: string, actionClass: string, risk?: RiskFacts | null): Promise<boolean> {
   try {
+    // SW8.3 — the risk classifier can only BLOCK earned autonomy, never grant it. Callers MUST
+    // supply the candidate's deterministic facts; absent facts (or a high score) fail closed to
+    // manual — the human reviews, exactly as if no grant existed.
+    if (riskBlocksAutonomy(risk ? riskFor(risk) : null)) return false;
     const { data: grant, error } = await admin.from('autonomy_grants')
       .select('mode, daily_cap').eq('owner_id', ownerId).eq('action_class', actionClass).maybeSingle();
     if (error || !grant || (grant as { mode: string }).mode !== 'auto') return false;
@@ -31,8 +41,11 @@ export async function autonomyAllowed(admin: any, ownerId: string, actionClass: 
       .eq('owner_id', ownerId).eq('decided_via', 'autonomy_grant')
       .contains('payload', { autonomy_class: actionClass })
       .gte('decided_at', dayStart.toISOString());
-    if (cErr) return false;
-    return (count ?? 0) < cap;
+    // Fail-closed on an UNKNOWN count too (mutation looking-glass, SW10.12): a null count with
+    // no error is not "zero used today" — it is "we could not count", and an uncountable day
+    // must not self-approve. Unknown usage is not zero usage.
+    if (cErr || count == null) return false;
+    return count < cap;
   } catch {
     return false;
   }

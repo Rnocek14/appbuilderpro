@@ -12,7 +12,7 @@
 // Deploy: npx supabase functions deploy cluster-chat
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, modelForPlan, type AIMessage } from '../_shared/ai.ts';
+import { complete, corsHeaders, brainModelForPlan, type AIMessage } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 
 interface ChatRequest {
@@ -53,7 +53,8 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     await checkCredits(admin, user.id, 'explore');
-    const m = modelForPlan(await getUserPlan(admin, user.id));
+    // Judgment path: the brain tier (AI_BRAIN_MODEL) when configured, the plan default when not.
+    const m = brainModelForPlan(await getUserPlan(admin, user.id));
 
     const history = (body.history ?? []).slice(-6)
       .map((t) => `${t.role === 'user' ? 'OWNER' : 'GARVIS'}: ${String(t.content ?? '').slice(0, 300)}`)

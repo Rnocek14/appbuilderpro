@@ -23,7 +23,6 @@ export interface HealthReport {
 
 // The functions that matter, grouped by the pillar they serve (from package.json deploy lists).
 const FUNCTIONS: { name: string; group: string }[] = [
-  { name: 'generate-app', group: 'Build' },
   { name: 'chat-edit', group: 'Build' },
   { name: 'deploy-site', group: 'Build' },
   { name: 'garvis-brain', group: 'Brain' },

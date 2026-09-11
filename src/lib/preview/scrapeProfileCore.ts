@@ -5,7 +5,7 @@
 // unknowns are omitted, never invented. The impure half (fetch-url + model + ingest) lives in
 // scrapeProfile.ts and calls these.
 
-import type { SourcedPhoto } from './spec';
+import type { SourcedPhoto } from './spec.ts';
 
 export const EXTRACT_SYSTEM = `You read the scraped text of ONE local business's website and extract a
 factual profile. You are NOT writing marketing copy — you are recording only what the page states.

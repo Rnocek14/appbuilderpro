@@ -6,9 +6,8 @@
 // layers on later. This is DISTINCT from FableForge's own /billing (which bills the operator for Pro).
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { NavLink, useSearchParams } from 'react-router-dom';
+import { Navigate, NavLink, useSearchParams } from 'react-router-dom';
 import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket } from 'lucide-react';
-import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { Button, StatCard, EmptyState, LoadError } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -30,7 +29,7 @@ const STATUS_CLS: Record<string, string> = {
   active: 'text-forge-ok', pending: 'text-forge-warn', canceled: 'text-forge-dim',
 };
 
-export default function ClientBilling() {
+export function ClientBillingContent() {
   const { toast } = useToast();
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
 
@@ -62,7 +61,7 @@ export default function ClientBilling() {
     if (b) setBizName(b);
     if (e) setEmail(e);
     if (t === 'website' || t === 'website_automation') { setTier(t); setPrice(t === 'website' ? '1500' : '500'); }
-    if (b || e || t) setParams({}, { replace: true });
+    if (b || e || t) { const next = new URLSearchParams(params); next.delete('business'); next.delete('email'); next.delete('tier'); setParams(next, { replace: true }); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -120,12 +119,7 @@ export default function ClientBilling() {
   };
 
   return (
-    <AppShell>
-      <div className="mx-auto max-w-4xl px-4 py-6">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Receipt size={18} /></span>
-          <h1 className="text-xl font-semibold text-forge-ink">Client revenue</h1>
-        </div>
+    <div className="mx-auto max-w-4xl px-4 py-6">
         <p className="mb-5 text-sm text-forge-dim">
           Sell the two offers and track your book. Send a client their payment link, mark them active when they pay, and watch your MRR add up.
         </p>
@@ -346,6 +340,15 @@ export default function ClientBilling() {
           </>
         )}
       </div>
-    </AppShell>
   );
+}
+
+/** ONE revenue room (SW2.6): this door now lives as the "Client book" tab inside Money. The
+ *  route stays alive — merge and relocate, never amputate — and any prefill params
+ *  (?business=&email=&tier=) ride along so deep links keep working. */
+export default function ClientBilling() {
+  const [params] = useSearchParams();
+  const next = new URLSearchParams(params);
+  next.set('tab', 'clients');
+  return <Navigate to={`/garvis/money?${next.toString()}`} replace />;
 }

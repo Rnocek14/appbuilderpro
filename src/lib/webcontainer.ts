@@ -9,6 +9,8 @@
 import { WebContainer, type FileSystemTree, type WebContainerProcess } from '@webcontainer/api';
 import type { ProjectFile } from '../types';
 import { isMetaFile } from './projectBrain';
+import { registryPin } from './depRegistry';
+import { QA_HTML_CAP } from './runtimeQa';
 
 export type { WebContainerProcess };
 
@@ -108,13 +110,21 @@ const OBSERVABILITY_SHIM = `<script>
   window.addEventListener('error',function(e){ send({type:'error',message:String((e.error&&e.error.stack)||e.message)}); });
   window.addEventListener('unhandledrejection',function(e){ send({type:'error',message:'Unhandled rejection: '+String((e.reason&&(e.reason.stack||e.reason.message))||e.reason)}); });
   function visibleText(){ try{ var t=((document.body&&document.body.innerText)||'').replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim(); return t.slice(0,4000);}catch(_){ return ''; } }
-  function snap(){ send({type:'dom',dom:visibleText(),title:document.title,route:(location.pathname+location.search+location.hash)||'/'}); }
+  function qaHtml(){ try{ return document.documentElement.outerHTML.slice(0,${QA_HTML_CAP}); }catch(_){ return null; } }
+  function snap(){ send({type:'dom',dom:visibleText(),title:document.title,route:(location.pathname+location.search+location.hash)||'/',qaHtml:qaHtml()}); }
   var t=null; function schedule(){ if(t)clearTimeout(t); t=setTimeout(snap,500); }
   window.addEventListener('load',function(){ send({type:'ready'}); schedule(); try{ new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,characterData:true}); }catch(_){ } });
   ['click','input','change','keyup'].forEach(function(ev){ try{ document.addEventListener(ev,schedule,true); }catch(_){ } });
   ['popstate','hashchange'].forEach(function(ev){ try{ window.addEventListener(ev,schedule); }catch(_){ } });
   var H2C=['https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js','https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'];
   function loadH2C(){ if(window.html2canvas) return Promise.resolve(); return new Promise(function(res,rej){ var i=0; (function n(){ if(i>=H2C.length){rej(new Error('h2c'));return;} var s=document.createElement('script'); s.src=H2C[i++]; s.crossOrigin='anonymous'; s.onload=function(){res();}; s.onerror=n; document.head.appendChild(s); })(); }); }
+  window.addEventListener('message',function(e){ var d=e.data; if(!d||!d.__ff_cmd||d.type!=='navigate') return;
+    try{ var r=String(d.route||'/');
+      if((location.hash&&location.hash.indexOf('#/')===0)||r.indexOf('#')===0){ location.hash=(r.indexOf('#')===0?r:'#'+r); }
+      else{ history.pushState(null,'',r); window.dispatchEvent(new PopStateEvent('popstate')); }
+      schedule(); // same-route hops fire no hashchange — snapshot unconditionally for the probe
+    }catch(err){}
+  });
   window.addEventListener('message',function(e){ var d=e.data; if(!d||!d.__ff_cmd||d.type!=='screenshot') return;
     loadH2C().then(function(){ return window.html2canvas(document.body,{useCORS:true,allowTaint:false,logging:false,backgroundColor:'#ffffff',scale:1,width:document.documentElement.clientWidth,height:document.documentElement.clientHeight,windowWidth:document.documentElement.clientWidth,windowHeight:document.documentElement.clientHeight}); })
     .then(function(c){ var cv=c; if(c.width>1024){ var r=1024/c.width,nc=document.createElement('canvas'); nc.width=1024; nc.height=Math.round(c.height*r); nc.getContext('2d').drawImage(c,0,0,nc.width,nc.height); cv=nc; } send({type:'screenshot',dataUrl:cv.toDataURL('image/jpeg',0.8)}); })
@@ -186,7 +196,10 @@ function scanImports(files: ProjectFile[]): Set<string> {
   return names;
 }
 
-/** Ensure every imported package is in package.json dependencies (added as "latest"). */
+/** Ensure every imported package is in package.json dependencies — at the registry's pin when
+ *  the package is blessed, and only at "latest" (with a visible log line) when it never was.
+ *  An unpinned injection is the drift the dep registry exists to kill; the log keeps the
+ *  remaining hole honest instead of silent. */
 function reconcilePackageJson(files: ProjectFile[]): ProjectFile[] {
   const pkg = files.find((f) => f.path === '/package.json');
   if (!pkg) return files;
@@ -197,7 +210,9 @@ function reconcilePackageJson(files: ProjectFile[]): ProjectFile[] {
   let changed = false;
   for (const name of scanImports(files)) {
     if (deps[name] || dev[name]) continue;
-    deps[name] = 'latest';
+    const pin = registryPin(name);
+    if (!pin) console.warn(`[deps] "${name}" has no registry pin — installing "latest" (add it to _shared/depRegistry.ts to pin it)`);
+    deps[name] = pin ? `^${pin}` : 'latest';
     changed = true;
   }
   if (!changed) return files;
@@ -416,9 +431,12 @@ export async function syncFiles(projectId: string, files: ProjectFile[]): Promis
 let deepActive = false;                                            // a deep verify owns the container
 let deepRun: Promise<{ ran: boolean; diags: TsDiag[] }> | null = null; // in-flight verify (startRunner awaits it)
 
-export async function deepTypecheck(projectId: string, files: ProjectFile[]): Promise<{ ran: boolean; diags: TsDiag[] }> {
+export async function deepTypecheck(projectId: string, files: ProjectFile[]): Promise<{ ran: boolean; diags: TsDiag[]; reason?: string }> {
   try {
-    if (!isolationReady() || !hasPackageJson(files)) return { ran: false, diags: [] };
+    // Each not-ran path NAMES its reason (SW3.1): "static only" without a why is the silent
+    // degrade the honest-verification work exists to kill.
+    if (!isolationReady()) return { ran: false, diags: [], reason: 'this tab lacks cross-origin isolation — open the Full-runtime preview to compile-verify' };
+    if (!hasPackageJson(files)) return { ran: false, diags: [], reason: 'not a runnable project (no package.json)' };
 
     // The live runner already serves this project — reuse it wholesale.
     if (state.projectId === projectId && state.status === 'ready') {
@@ -429,18 +447,18 @@ export async function deepTypecheck(projectId: string, files: ProjectFile[]): Pr
     if (deepRun) return deepRun;
     // The container is busy with ANOTHER project (or mid-boot) — never clobber a live session.
     if (state.projectId !== projectId && state.status !== 'idle' && state.status !== 'error') {
-      return { ran: false, diags: [] };
+      return { ran: false, diags: [], reason: 'the compiler is serving another project right now' };
     }
     // A REAL boot (dev server) is in flight for this project — never fight it; static-only.
     if (state.projectId === projectId && !deepActive
         && (state.status === 'booting' || state.status === 'mounting' || state.status === 'installing' || state.status === 'starting')) {
-      return { ran: false, diags: [] };
+      return { ran: false, diags: [], reason: 'the preview is still booting — verification will catch up' };
     }
 
     deepRun = runDeep(projectId, files);
     return await deepRun;
   } catch {
-    return { ran: false, diags: [] };
+    return { ran: false, diags: [], reason: 'the compiler crashed before it could check' };
   }
 }
 

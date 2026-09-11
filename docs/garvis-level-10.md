@@ -31,19 +31,28 @@ rest of Wave 4 waits. Everything rides existing proven patterns (approval spine,
 
 ## Quick-wins checklist (Wave 1, deduped)
 
-- [ ] **[Server-rendered…]** QW1 (the whole social fix, ~1 day): render-design edge function with kind 'brand_card' only at 1080x1080/1200x628 + the brandCardDesign builder in _shared/designSpec.ts + fonts + config.toml — social sizes are far inside the 2s CPU / 300MB edge limits.
+> **TRUTH PASS (Aug 14, 2026):** boxes below are updated with file evidence — several landed
+> without being checked off, and reading this list as a to-do was causing redone work. Lines
+> still unchecked are genuinely open. Standing decisions (recorded so nothing reads as
+> silently done): **email behavioral segments + drip flows → BUILD** (best-in-class plan
+> SW10.7); **subject A/B + branded HTML shell (`_shared/emailHtml.ts` does not exist) →
+> DEFERRED**, revisit after SW10; **social calendar slots / best-time hints (Spec 3 phases
+> 1/4) → DEFERRED**, revisit after SW10; **Lob fulfillment (Spec 5A) → BUILD** at SW10.2-10.4
+> — note its migration numbers (app_0080-0082) are long stale; re-derive from the tree.
+
+- [x] **[Server-rendered…]** QW1 (the whole social fix, ~1 day): render-design edge function with kind 'brand_card' only at 1080x1080/1200x628 + the brandCardDesign builder in _shared/designSpec.ts + fonts + config.toml — social sizes are far inside the 2s CPU / 300MB edge limits. **[DONE — supabase/functions/render-design/ + _shared/designSpec.ts exist]**
 - [ ] **[Server-rendered…]** QW2 (hours): attach the rendered card in queueSocialTile (src/lib/garvis/socialBoardRun.ts lines 87-91) — deletes the 'Posting as text only' warning path and un-dead-ends Instagram brand posts refused by socialCore.ts MEDIA_REQUIRED.
 - [ ] **[Server-rendered…]** QW3 (minutes): add 'design_render' to CreditKind + KIND_ESTIMATE in supabase/functions/_shared/credits.ts so the seam is metered from day one.
 - [ ] **[Server-rendered…]** QW4 (hours): 'Export print PNG' button in MailerDesigner.tsx calling postcard_front/postcard_back at 1800x1350 first, bumping to 2700x1800 once staging CPU timing is confirmed.
 - [ ] **[The…]** Fix the dead idea_stream toggle: one-line constraint widening (the app_0079 pattern) adding 'idea_stream' to standing_orders_kind_check — today IdeaBoard.tsx:183's insert is rejected by Postgres every time; fold into app_0080 or ship standalone in an hour.
-- [ ] **[The…]** Extract _shared/copyJudge.ts from board-copy/index.ts (FIELDS/CRAFT/judge prompts, lines 28-166) as a pure refactor with zero behavior change + a verify file — the prerequisite that unlocks any worker-side judging.
+- [x] **[The…]** Extract _shared/copyJudge.ts from board-copy/index.ts (FIELDS/CRAFT/judge prompts, lines 28-166) as a pure refactor with zero behavior change + a verify file — the prerequisite that unlocks any worker-side judging. **[DONE — supabase/functions/_shared/copyJudge.ts exists]**
 - [ ] **[The…]** Populate MATERIALS.voiceExample in loadSocialMaterials (src/lib/garvis/socialBoardRun.ts:22-43) from the most recent social_posts row with status 'posted' — board-copy's prompt already honors it (index.ts:110); every board Make immediately writes in the owner's approved voice with no server change.
 - [ ] **[The…]** Stop dropping judge scores: boardCopyRun.ts already returns quality{score,notes} (lines 44-49) — store it into the tile content in the board adapters (applySocialCopy/applyIdeaCopy etc.) and render a small score badge, giving the first persisted audit trail and the data to later pick voiceExamples by score.
 - [ ] **[Social…]** Pass scheduleAt through the board queue: add a small datetime picker to SocialFocus and forward it via the ALREADY-EXISTING queueSocialTile scheduleAt parameter (src/lib/garvis/socialBoardRun.ts line 73, currently dead at SocialBoard.tsx line 169) — board posts become schedulable in ~2 hours.
 - [ ] **[Social…]** Multi-image on SocialPublisher: swap the single mediaUrl input (src/components/garvis/SocialPublisher.tsx line 39) for a one-URL-per-line textarea — providerPayload already forwards mediaUrls[] (socialCore.ts lines 91-92) and 2-10 URLs on Instagram is a carousel with zero provider changes; pair with the CAROUSEL_MAX checkDraft gate.
 - [ ] **[Social…]** Honest social line in the results lens: add social:{queued,scheduled,posted,failed} row-counts from social_posts to src/lib/garvis/resultsRun.ts worldResults() — pure counting in the file's existing style, no provider calls, kills the silent absence of the whole channel.
 - [ ] **[Social…]** Surface the quality score: keep board-copy's quality{score,notes} in SocialBoard.tsx generate() (currently discarded at lines 92-98) and render a score badge + judge notes on the tile — the automation bar (>= 8) becomes visible today.
-- [ ] **[Email…]** Persist engagement events: app_0080's outreach_events table + the 3 insert sites (resend-webhook for opened/clicked/delivered/bounced, unsubscribe for unsubscribed, resend-inbound for replied) — ~150 lines total, unlocks every other feature and starts accruing history immediately.
+- [x] **[Email…]** Persist engagement events: app_0080's outreach_events table + the 3 insert sites (resend-webhook for opened/clicked/delivered/bounced, unsubscribe for unsubscribed, resend-inbound for replied) — ~150 lines total, unlocks every other feature and starts accruing history immediately. **[DONE — app_0081_outreach_events.sql + resend-webhook/resend-inbound inserts]**
 - [ ] **[Email…]** Stamp batch_id on batch-drained messages: one column (already in the migration) + one field in the standing-worker insert at supabase/functions/standing-worker/index.ts line 184 — makes every future batch joinable to its events.
 - [ ] **[Email…]** Per-batch stats line in BatchSendCard.tsx from outreach_events (computeBatchStats pure fn + one query) — the visible 'Mailchimp moment' for the operator.
 - [ ] **[Email…]** Branded HTML shell behind outreach_settings.html_style (default 'plain'): _shared/emailHtml.ts + a ~10-line change in send-email — no behavior change for anyone who doesn't opt in.
@@ -53,12 +62,12 @@ rest of Wave 4 waits. Everything rides existing proven patterns (approval spine,
 - [ ] **[A…]** Write mail_batches.batch_token at logMailBatch time and thread it into the designer QR via a new attributedUrl(link,'postcard',token) in mailer.ts — per-DROP attribution lands before any Lob work (app_0063_farm.sql:79 column already exists; src/lib/garvis/mailer.ts:200-204).
 - [ ] **[Video…]** Server-side AI-disclosure gate in social-publish/index.ts: port disclosureGate to _shared/mediaProvenanceCore.ts, look up media_urls in cluster_files, and block() undisclosed AI media after the checkDraft gate — closes the biggest honesty hole (task #164's core) in ~60 lines plus one migration column.
 - [ ] **[Video…]** Durable renders: add the finalize step to render-video's status mode (fetch the done mp4, store in project-assets, return the storage URL) and make saveRenderedVideo's slug unique — fixes both the 24-hour Shotstack URL rot and the every-render-overwrites-the-last bug in videoRun.ts:99.
-- [ ] **[Video…]** Music bed v0: timeline.soundtrack with one hand-picked CC0 track and volume 0.3 in toShotstackEdit plus a UI toggle — roughly 20 lines in storyboard.ts + verify checks.
+- [x] **[Video…]** Music bed v0: timeline.soundtrack with one hand-picked CC0 track and volume 0.3 in toShotstackEdit plus a UI toggle — roughly 20 lines in storyboard.ts + verify checks. **[DONE — storyboard.ts timeline.soundtrack + musicBed.ts + verify]**
 - [ ] **[Video…]** 'Queue to social' button in VideoStudio.tsx after a successful render, calling the existing queueSocialPost with mediaUrls:[durableUrl] — connects the two already-built paths with zero new infrastructure.
 - [ ] **[Quality…]** Stop dropping the score: add quality to BoardTile (src/lib/garvis/creativeBoard.ts), switch the 4 copy adapters to return { content, quality } and render the shell badge + focus-dock notes in CreativeBoard.tsx — the judge already runs on every make, this is pure surfacing (steps 4-5 minus best-of-3).
-- [ ] **[Quality…]** Extract QUALITY_BAR: create _shared/qualityCore.ts + src/lib/garvis/quality.ts re-export + quality.verify.ts, and replace the hardcoded 8 at board-copy/index.ts:169 — under two hours, unblocks every other consumer.
+- [x] **[Quality…]** Extract QUALITY_BAR: create _shared/qualityCore.ts + src/lib/garvis/quality.ts re-export + quality.verify.ts, and replace the hardcoded 8 at board-copy/index.ts:169 — under two hours, unblocks every other consumer. **[DONE — LANDED Aug 14 2026: _shared/qualityCore.ts + quality.verify.ts; board-copy consumes it]**
 - [ ] **[Quality…]** '8+' filter toggle beside the star filter in CreativeBoard.tsx (lines 275-278, 337) — an hour once the badge lands.
-- [ ] **[Quality…]** Persist scores + 2 scorecard lines: the copy_quality_events table + one best-effort insert in board-copy + the avg/kill-rate lines in garvis-scorecard — a few hours, and quality starts accruing history immediately even before the UI ships.
+- [ ] **[Quality…]** Persist scores + 2 scorecard lines: the copy_quality_events table + one best-effort insert in board-copy + the avg/kill-rate lines in garvis-scorecard — a few hours, and quality starts accruing history immediately even before the UI ships. **[PARTIAL Aug 14 2026 — app_0139 table + best-effort insert LANDED; the garvis-scorecard avg/kill-rate lines are still open]**
 
 ## Scores today → after each wave
 

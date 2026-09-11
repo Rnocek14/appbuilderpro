@@ -8,11 +8,12 @@
 import { supabase } from '../supabase';
 import { markProjectAppLaunched } from './productLifecycle';
 import { hashPayload } from './payloadHash';
+import { expiresAtFor } from './approvalTtl';
 
 export type ApprovalKind =
   | 'send_email' | 'send_sms' | 'publish_post' | 'deploy_site' | 'deploy_backend'
   | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature'
-  | 'content_week';
+  | 'content_week' | 'ship_repo' | 'send_mail';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -27,6 +28,11 @@ export interface Approval {
   world_id?: string | null;
   created_at: string;
   decided_at: string | null;
+  /** The decision window's end (app_0141) — display-only until the SW5.1 sweep lands. */
+  expires_at?: string | null;
+  /** The risk annotation (SW8.3) — deterministic score + named reasons, worker-written. */
+  risk_score?: number | null;
+  risk_reasons?: string[] | null;
 }
 
 export interface ExecutionRun {
@@ -66,6 +72,8 @@ export async function enqueueApproval(input: {
     payload_hash,
     requested_by: input.requestedBy ?? 'user',
     world_id: input.worldId ?? null,
+    // The decision clock (app_0141): a per-kind window, rendered as a countdown on the card.
+    expires_at: expiresAtFor(input.kind, new Date().toISOString()),
   }).select('id').single();
   if (error) throw new Error(error.message);
   return (data as { id: string }).id;
@@ -74,7 +82,7 @@ export async function enqueueApproval(input: {
 export async function listApprovals(status: ApprovalStatus | 'all' = 'pending', limit = 50): Promise<Approval[]> {
   let q = supabase
     .from('approvals')
-    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id')
+    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id, expires_at, risk_score, risk_reasons')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (status !== 'all') q = q.eq('status', status);
@@ -187,6 +195,49 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     const res = await executeBackendDeploy(a);
     if (!res.ok) await revertToPending(a.id);
     return res;
+  }
+
+  // send_mail (SW10.3/10.4): a REAL executor. The drop + pieces + design were snapshotted and
+  // hash-bound at staging; lob-send re-verifies everything server-side (kill switch, hashes,
+  // EDIT holes, cost ceiling, do-not-mail at send time) and drains the pieces through Lob with
+  // per-piece CAS + idempotency. A soft failure returns the row to pending — retryable, never
+  // stranded (the send-email semantics, exactly).
+  if (a.kind === 'send_mail') {
+    const dropId = a.payload?.drop_id as string | undefined;
+    if (dropId) {
+      await supabase.from('mail_drops').update({ status: 'approved' })
+        .eq('id', dropId).eq('status', 'staged').then(() => {}, () => {});
+    }
+    const { data, error } = await supabase.functions.invoke('lob-send', { body: { approval_id: a.id } });
+    if (error) {
+      // A 409 means the drain is ALREADY running (healthy concurrency) — reverting to pending
+      // would decapitate a live drain (deep review). Only genuine failures revert.
+      const status = (error as { context?: { status?: number } }).context?.status;
+      if (status !== 409) await revertToPending(a.id);
+      const { invokeFailure } = await import('./videoRun');
+      return { ok: status === 409, error: (await invokeFailure(error, 'The mail executor (lob-send)')).message };
+    }
+    const res = data as { ok?: boolean; error?: string; submitted?: number; draining?: boolean };
+    if (!res?.ok && !res?.draining) await revertToPending(a.id);
+    return { ok: !!(res?.ok || res?.draining), error: res?.error, result: res };
+  }
+
+  // ship_repo (SW10.1): a REAL executor. The source snapshot was captured into deploy_bundles at
+  // authorization time (requestRepoShip); github-export re-verifies the approval, the payload
+  // hash, and the snapshot hash server-side, resolves the token server-side, and writes the
+  // ledger row itself. We send only the approval id.
+  if (a.kind === 'ship_repo') {
+    const { data, error } = await supabase.functions.invoke('github-export', { body: { approval_id: a.id } });
+    if (error) {
+      await revertToPending(a.id);
+      // Surface the executor's own named refusal (snapshot changed, in flight…), never the
+      // generic non-2xx line (the honesty-spine rule the sibling branches already follow).
+      const { invokeFailure } = await import('./videoRun');
+      return { ok: false, error: (await invokeFailure(error, 'The repo exporter (github-export)')).message };
+    }
+    const res = data as { ok?: boolean; error?: string; url?: string };
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
   }
 
   if (a.kind === 'publish_post') {
@@ -376,6 +427,12 @@ export async function rejectApproval(id: string): Promise<void> {
   if (invoiceId) {
     await supabase.from('invoices').update({ status: 'draft', sent_at: null, updated_at: new Date().toISOString() })
       .eq('id', invoiceId).eq('status', 'sent').then(() => {}, () => {});
+  }
+
+  // Rejecting a mail drop cancels the staged drop — the snapshot must not linger looking sendable.
+  if (inv.kind === 'send_mail' && inv.payload?.drop_id) {
+    await supabase.from('mail_drops').update({ status: 'canceled' })
+      .eq('id', inv.payload.drop_id as string).in('status', ['staged', 'approved']).then(() => {}, () => {});
   }
 
   // Rejecting a content week REVOKES autonomy (safe regression: streak to 0, auto-mode off) and

@@ -15,7 +15,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
-import { notifyText } from '../_shared/notify.ts';
+import { notifyOwner } from '../_shared/notify.ts';
 import { parsePlan } from '../../../src/lib/garvis/orchestrator.ts';
 import { ACTION_SPECS } from '../../../src/lib/garvis/actionCatalog.ts';
 
@@ -117,7 +117,9 @@ Deno.serve(async (req) => {
         owner_id: o.id, event_type: 'note', source: 'canary',
         subject: line.slice(0, 280), payload: { key: `canary-fail:${new Date().toISOString().slice(0, 10)}`, failures, notes },
       }).then(() => {}, () => {});
-      await notifyText(o.webhook_url, line).catch(() => {});
+      // The canary's whole job is to make silence impossible — its alarm gets the fallback
+      // channel (webhook, else the owner's own email) rather than the optional webhook alone.
+      await notifyOwner(admin, o.id, line).catch(() => {});
     }
   }
 

@@ -10,6 +10,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { normalizeSenderDomain, parseResendDomain } from '../../../src/lib/garvis/email/senderDomain.ts';
+import { serviceKey } from '../_shared/connections.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -37,8 +38,10 @@ Deno.serve(async (req) => {
     const uid = user.id;
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const resendKey = Deno.env.get('RESEND_API_KEY');
-    if (!resendKey) return json({ error: 'Email is not connected — set RESEND_API_KEY in Supabase secrets.' }, 400);
+    // Connection-first (API manager): domains manage on the caller's own Resend account when
+    // they've connected one; the platform key is the fallback.
+    const { key: resendKey } = await serviceKey(admin, uid, 'resend', 'RESEND_API_KEY');
+    if (!resendKey) return json({ error: 'Email is not connected — connect Resend in Settings → Connections.' }, 400);
 
     const resend = (path: string, init: RequestInit = {}) =>
       fetch(`https://api.resend.com${path}`, {

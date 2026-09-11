@@ -3,17 +3,17 @@
 // organic results — never invented), then LOOK at each one's site and audit it honestly (auditSite).
 // Nothing here fabricates a business, a URL, or a verdict; an unreachable site is an honest unknown.
 
-import { supabase } from '../supabase';
-import { parsePlace, type PlaceRaw } from './placesDiscovery';
+import { supabase } from '../supabase.ts';
+import { parsePlace, type PlaceRaw } from './placesDiscovery.ts';
 import { splitCityState, type ScoutLead } from './claudeScout.ts';
-import { deriveSignals, proposeFromSignals } from './automation/detect';
-import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
+import { deriveSignals, proposeFromSignals } from './automation/detect.ts';
+import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit.ts';
 import type { DeepScan } from '../../../supabase/functions/_shared/scanTypes.ts';
 import type { ScanFacts } from '../../../supabase/functions/_shared/deepScan.ts';
-import { persistScan } from './prospects/findingsStore';
-import { sweepPlan, registerDomain } from './nationalSweepCore';
-import { detectVertical } from './verticals';
-import type { UsCity } from './usCities';
+import { persistScan } from './prospects/findingsStore.ts';
+import { sweepPlan, registerDomain } from './nationalSweepCore.ts';
+import { detectVertical } from './verticals.ts';
+import type { UsCity } from './usCities.ts';
 
 export interface FoundBusiness {
   name: string;

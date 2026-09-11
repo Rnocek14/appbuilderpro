@@ -4,11 +4,11 @@
 
 import { supabase } from '../supabase';
 import type { MindBelief, MindDecision, MindEvent, MindIdentityDoc } from '../../types';
-import { compileMindContext } from './mind';
+import { compileMindContext, compileMindParts, type MindContextInput } from './mind';
 
 const scopeFilter = (appId: string) => `app_id.eq.${appId},app_id.is.null`;
 
-export async function loadMindRecordContext(opts: { appId?: string | null; budgetChars?: number } = {}): Promise<string> {
+async function loadMindInputs(opts: { appId?: string | null } = {}): Promise<Omit<MindContextInput, 'budgetChars' | 'now'> | null> {
   try {
     let decisionsQ = supabase.from('mind_decisions').select('*').order('decided_at', { ascending: false }).limit(30);
     let eventsQ = supabase.from('mind_events').select('*').order('occurred_at', { ascending: false }).limit(80);
@@ -22,15 +22,28 @@ export async function loadMindRecordContext(opts: { appId?: string | null; budge
       decisionsQ,
       eventsQ,
     ]);
-    if (identity.error || beliefs.error || decisions.error || events.error) return '';
-    return compileMindContext({
+    if (identity.error || beliefs.error || decisions.error || events.error) return null;
+    return {
       identity: (identity.data as MindIdentityDoc[]) ?? [],
       beliefs: (beliefs.data as MindBelief[]) ?? [],
       decisions: (decisions.data as MindDecision[]) ?? [],
       events: (events.data as MindEvent[]) ?? [],
-      budgetChars: opts.budgetChars,
-    });
+    };
   } catch {
-    return '';
+    return null;
   }
+}
+
+export async function loadMindRecordContext(opts: { appId?: string | null; budgetChars?: number } = {}): Promise<string> {
+  const inputs = await loadMindInputs(opts);
+  return inputs ? compileMindContext({ ...inputs, budgetChars: opts.budgetChars }) : '';
+}
+
+/** The cache-split record (SW2.3): stable (identity + beliefs) for the cached system position,
+ *  volatile (open decisions + recent events) for the user turn. Fail-soft to empty strings. */
+export async function loadMindRecordParts(opts: { appId?: string | null; stableBudget?: number; volatileBudget?: number } = {}): Promise<{ stable: string; volatile: string }> {
+  const inputs = await loadMindInputs(opts);
+  return inputs
+    ? compileMindParts({ ...inputs, stableBudget: opts.stableBudget, volatileBudget: opts.volatileBudget })
+    : { stable: '', volatile: '' };
 }

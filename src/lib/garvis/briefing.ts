@@ -12,6 +12,8 @@
 //   - Nothing is invented, no hype, no hours-saved claims — counts and titles from real rows.
 //   - Quiet is stated as quiet: "nothing new, nothing waiting" is a valid, useful report.
 
+import { MIN_CLOSED_FOR_LINE } from './prediction';
+
 export interface BriefingFacts {
   /** Local hour 0-23 (passed in — the core stays pure and testable). */
   hour: number;
@@ -31,6 +33,11 @@ export interface BriefingFacts {
   clocks: number | null;
   /** Live channels. Null = probe failed. */
   channels: number | null;
+  /** The decision journal's CLOSED prediction record (SW7.2). Null = probe failed. */
+  predictions: { closed: number; hits: number } | null;
+  /** The overnight read (SW8.2) — the pulse's accepted 2-3 sentence synthesis, or null.
+   *  Additive and optional: the deterministic lines below are the spine either way. */
+  read: string | null;
 }
 
 export interface Briefing {
@@ -50,6 +57,9 @@ export function composeBriefing(f: BriefingFacts): Briefing {
   const lines: string[] = [];
   const since = sinceLabel(f.sinceHours);
 
+  // The overnight read leads WHEN IT EXISTS — it connects the facts below, never replaces them.
+  if (f.read) lines.push(`» ${f.read}`);
+
   if (f.episodes && f.episodes.length > 0) {
     const shown = f.episodes.slice(0, 3).map((e) => `“${e.title}” (${e.channel})`).join(', ');
     const more = f.episodes.length > 3 ? ` +${f.episodes.length - 3} more` : '';
@@ -66,6 +76,11 @@ export function composeBriefing(f: BriefingFacts): Briefing {
   }
   if (f.approvals !== null && f.approvals > 0) {
     lines.push(`${f.approvals} approval${f.approvals === 1 ? '' : 's'} waiting in your Queue.`);
+  }
+  // The prediction record (SW7.2) — one line, and only once there are enough CLOSED predictions
+  // for the rate to mean anything. A hit-rate over two data points is theater.
+  if (f.predictions && f.predictions.closed >= MIN_CLOSED_FOR_LINE) {
+    lines.push(`Predictions: ${f.predictions.hits} of ${f.predictions.closed} hit.`);
   }
   const running: string[] = [];
   if (f.clocks !== null && f.clocks > 0) running.push(`${f.clocks} clock${f.clocks === 1 ? '' : 's'} armed`);

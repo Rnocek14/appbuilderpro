@@ -955,6 +955,10 @@ TOOLS:
 - delete_file(path) — remove a file.
 - run_typecheck — compile the project (real TypeScript + static checks) and get back the errors. This
   is your ground truth for "does it work".
+- see_preview — LOOK at the running preview: the route, its console, and an approximate screenshot of
+  what actually rendered. After any UI change, use it to self-critique the result against the
+  blueprint's design spec (hierarchy, spacing, empty states) — compiling is not the same as looking
+  right. If no preview is open it says so honestly; never guess at what rendered.
 - web_search — search the live web. USE IT whenever the task involves anything you are not 100% certain
   how to do correctly from memory: a specific third-party API's real endpoints/params/auth, a library's
   current usage, a scraping or parsing approach, a data format, an algorithm, a recent best practice. Do

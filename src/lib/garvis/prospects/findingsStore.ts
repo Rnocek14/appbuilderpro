@@ -25,10 +25,10 @@
 // a finding that is no longer true must not keep appearing in a pitch. The historical record of
 // what we *said* survives in outreach_finding_refs, which is what the outcome join reads.
 
-import { supabase } from '../../supabase';
+import { supabase } from '../../supabase.ts';
 import type { DeepScan } from '../../../../supabase/functions/_shared/scanTypes.ts';
 import type { ScanFacts } from '../../../../supabase/functions/_shared/deepScan.ts';
-import type { PitchFinding } from './pitchFindings';
+import type { PitchFinding } from './pitchFindings.ts';
 
 /** True when the error is "this table/column doesn't exist yet" — i.e. app_0116 isn't applied. */
 function isMissingSchema(message: string | undefined): boolean {

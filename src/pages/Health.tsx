@@ -9,9 +9,49 @@ import { Loader2, Activity, Check, X, HelpCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { cn } from '../lib/utils';
 import { loadHealth, type HealthReport, type Probe } from '../lib/garvis/healthRun';
+import { supabase } from '../lib/supabase';
 import { ClockStatus } from '../components/garvis/ClockStatus';
 import { MasterSwitch } from '../components/garvis/MasterSwitch';
 import { HuntReadiness } from '../components/garvis/HuntReadiness';
+import { loadScorecard, type ScorecardFacts } from '../lib/garvis/forgeScoreRun';
+
+/** THE BUILDER/AUTONOMY SCORECARD (SW9.4): headline metrics from real rows with strict, stated
+ *  definitions. A fresh account shows honest zeroes ("no forges yet"), never a fake percent;
+ *  an execution row that traces to no approval is FLAGGED, not averaged away. */
+function ScorecardCard() {
+  const [facts, setFacts] = useState<ScorecardFacts | null>(null);
+  useEffect(() => { void loadScorecard().then(setFacts).catch(() => setFacts({ forge: null, ledger: null, unattendedLastDay: null })); }, []);
+  if (!facts) return null;
+  const f = facts.forge;
+  const l = facts.ledger;
+  const pct = (n: number | null) => (n === null ? null : `${Math.round(n * 100)}%`);
+  return (
+    <div className="mb-5 rounded-2xl border border-forge-border bg-forge-panel/40 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-forge-dim">Builder &amp; autonomy record</h3>
+      <ul className="mt-2 space-y-1 text-sm">
+        <li className="text-forge-ink/80">
+          {f === null ? 'First-forge success: unavailable (probe failed).'
+            : f.forges === 0 ? 'First-forge success: no forges yet — the number starts with your first build.'
+            : `First-forge success: ${f.firstTry} of ${f.forges} (${pct(f.firstTryRate)}) compiled clean AND route-walked clean on the first try.`}
+        </li>
+        <li className="text-forge-ink/80">
+          {f === null ? null
+            : f.forges === 0 ? 'Verification coverage: n/a until a forge runs.'
+            : `Verification coverage: ${f.verified} of ${f.forges} (${pct(f.coverage)}) had the compile gate actually run.`}
+        </li>
+        <li className={l && l.orphans.length > 0 ? 'text-forge-warn' : 'text-forge-ink/80'}>
+          {l === null ? 'Execution ledger: unavailable (probe failed).'
+            : l.orphans.length > 0 ? `⚠ Execution ledger: ${l.orphans.length} external run(s) trace to NO approval — inspect ids ${l.orphans.slice(0, 3).join(', ')}${l.orphans.length > 3 ? '…' : ''}.`
+            : `Execution ledger: all ${l.external} recent external runs trace to an approval.`}
+        </li>
+        <li className="text-forge-ink/80">
+          {facts.unattendedLastDay === null ? 'Unattended actions: unavailable (probe failed).'
+            : `Unattended actions (earned autonomy, last 24h): ${facts.unattendedLastDay}.`}
+        </li>
+      </ul>
+    </div>
+  );
+}
 
 const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string }> = {
   deployed: { icon: Check, cls: 'text-forge-ok', label: 'deployed' },
@@ -19,6 +59,36 @@ const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string
   error: { icon: X, cls: 'text-forge-warn', label: 'unreachable' },
   unknown: { icon: HelpCircle, cls: 'text-forge-dim', label: 'unknown' },
 };
+
+/** THE ALARM CHANNEL (SW5.1): where "something broke / something needs you" actually rings.
+ *  notifyOwner falls back webhook → owner's own email (via their verified sender); with neither,
+ *  the failure mode is silence — which this card refuses to leave unnamed. */
+function AlarmChannelCard() {
+  const [state, setState] = useState<'loading' | 'webhook' | 'email' | 'none'>('loading');
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        if (!auth.user) { setState('none'); return; }
+        const [{ data: prof }, { data: os }] = await Promise.all([
+          supabase.from('profiles').select('webhook_url').eq('id', auth.user.id).maybeSingle(),
+          supabase.from('outreach_settings').select('from_email').eq('owner_id', auth.user.id).maybeSingle(),
+        ]);
+        if ((prof as { webhook_url?: string | null } | null)?.webhook_url) setState('webhook');
+        else if ((os as { from_email?: string | null } | null)?.from_email) setState('email');
+        else setState('none');
+      } catch { setState('none'); }
+    })();
+  }, []);
+  if (state === 'loading') return null;
+  return (
+    <div className={`mb-5 rounded-xl border p-4 text-sm ${state === 'none' ? 'border-forge-warn/40 bg-forge-warn/10 text-forge-warn' : 'border-forge-border text-forge-dim'}`}>
+      {state === 'webhook' && <>Alarms (breaker trips, canary failures, approval nudges) ring your webhook.</>}
+      {state === 'email' && <>No webhook set — alarms fall back to an email to your own address, sent from your verified sender.</>}
+      {state === 'none' && <>No alarm channel: set a webhook in Settings, or verify a sender identity, so breaker trips and waiting approvals can reach you. Until then, those alarms are silent.</>}
+    </div>
+  );
+}
 
 export default function Health() {
   const [report, setReport] = useState<HealthReport | null>(null);
@@ -52,6 +122,9 @@ export default function Health() {
         {/* The clock: deployment says functions EXIST; this says the heartbeat actually TICKS. */}
         <div className="mb-5"><ClockStatus /></div>
 
+        {/* Where the machine's alarms actually reach the operator — silence named, never assumed. */}
+        <AlarmChannelCard />
+
         {/* The master switch: which secrets are set, which cron jobs are scheduled, and the
             guarded arm — the line between "built" and "running" made visible. */}
         <div className="mb-5"><MasterSwitch /></div>
@@ -59,6 +132,10 @@ export default function Health() {
         {/* Ready to hunt & send: the exact prerequisites for the scrape→demo→pitch→send pipeline,
             each with its fix — so "why did my hunt produce nothing?" is answered at a glance. */}
         <div className="mb-5"><HuntReadiness /></div>
+
+        {/* The builder/autonomy record: first-forge success, verification coverage, and the
+            execution-ledger identity — measured, never asserted. */}
+        <ScorecardCard />
 
         {!report && failed ? (
           <div className="rounded-xl border border-forge-warn/40 bg-forge-warn/10 p-4 text-sm text-forge-warn">

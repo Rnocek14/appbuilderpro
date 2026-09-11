@@ -14,7 +14,7 @@
 // .ts extension on the value import: this module is also imported by the automation-intake EDGE
 // function (Deno strict resolver). The type-only imports are erased and need none.
 import { proposeFromSignals, type DetectedSignal, type DetectionResult } from './detect.ts';
-import type { Vertical } from '../verticals';
+import type { Vertical } from '../verticals.ts';
 
 /** One grounded manual-process signal we can recognise in an operator's own description, with the
  *  patterns that ground it. `id` matches the registry's matchesSignals so proposeFromSignals resolves

@@ -11,14 +11,13 @@ import Auth from './pages/Auth';
 import OAuthCallback from './pages/OAuthCallback';
 
 // Every workspace behind auth (and the heavy public preview pages) is code-split, so the main bundle
-// no longer carries Monaco, Sandpack, three.js, pdf.js, Recharts, xterm, etc. up front — each route
+// no longer carries Monaco, three.js, pdf.js, Recharts, xterm, etc. up front — each route
 // pulls its own chunk on navigation. A per-route error boundary + Suspense wraps them all below.
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Garvis = lazy(() => import('./pages/Garvis'));
 const Marketing = lazy(() => import('./pages/Marketing'));
 const Missions = lazy(() => import('./pages/Missions'));
 const Command = lazy(() => import('./pages/Command'));
-const Mind = lazy(() => import('./pages/Mind'));
 const Memory = lazy(() => import('./pages/Memory'));
 const Opportunities = lazy(() => import('./pages/Opportunities'));
 const MissionControl = lazy(() => import('./pages/MissionControl'));
@@ -32,7 +31,6 @@ const Pricing = lazy(() => import('./pages/Pricing'));
 const Billing = lazy(() => import('./pages/Billing'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const ClusterSpike = lazy(() => import('./pages/spike/ClusterSpike'));
-const Brain = lazy(() => import('./pages/Brain'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const WinClients = lazy(() => import('./pages/WinClients'));
 const Automations = lazy(() => import('./pages/Automations'));
@@ -48,6 +46,7 @@ const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const FleetView = lazy(() => import('./pages/FleetView'));
 const Working = lazy(() => import('./pages/Working'));
+const Field = lazy(() => import('./pages/Field'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
 const Workshops = lazy(() => import('./pages/Workshops'));
 const WorkWebs = lazy(() => import('./pages/WorkWebs'));
@@ -114,12 +113,14 @@ function AppRoutes() {
           <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
           {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
           <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
-          <Route path="/garvis/mind" element={<Protected><Mind /></Protected>} />
+          {/* Knowledge doors closed honestly (SW2.7): Memory mounts both halves, so the old
+              standalone rooms become redirects — zero lost URLs, two fewer page shells. */}
+          <Route path="/garvis/mind" element={<Navigate to="/garvis/memory?tab=mind" replace />} />
           <Route path="/garvis/control" element={<Protected><MissionControl /></Protected>} />
           <Route path="/garvis/marketing" element={<Protected><Marketing /></Protected>} />
           <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />
           <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
-          <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
+          <Route path="/garvis/brain" element={<Navigate to="/garvis/memory" replace />} />
           {/* ONE QUEUE (design review P0): the three triage rooms merged. Old doors redirect —
               every deep link, toast, and waking move keeps working (merge and relocate). */}
           <Route path="/garvis/queue" element={<Protected><Queue /></Protected>} />
@@ -142,6 +143,7 @@ function AppRoutes() {
           <Route path="/garvis/studies/:id" element={<Protected><Studies /></Protected>} />
           <Route path="/garvis/fleet" element={<Protected><FleetView /></Protected>} />
           <Route path="/garvis/working" element={<Protected><Working /></Protected>} />
+          <Route path="/garvis/field" element={<Protected><Field /></Protected>} />
           <Route path="/garvis/setup" element={<Protected><ClientReadiness /></Protected>} />
           <Route path="/garvis/approvals" element={<Navigate to="/garvis/queue" replace />} />
           <Route path="/garvis/workshops" element={<Protected><Workshops /></Protected>} />

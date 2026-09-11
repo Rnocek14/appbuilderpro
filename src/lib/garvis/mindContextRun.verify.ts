@@ -17,7 +17,10 @@ check('one loader reads all four mind sections', ['mind_identity', 'mind_beliefs
 check('loader delegates budgeting to compileMindContext', loader.includes('compileMindContext({'));
 check('general agent input includes the mind contract', runtime.includes('loadMindRecordContext({ appId, budgetChars: 4_000 })'));
 check('builder input includes the same mind contract', builder.includes('mindDigest, knowledgeDigest'));
-check('context loading fails soft without fabricating a replacement', loader.includes("catch {\n    return '';"));
+check('context loading fails soft without fabricating a replacement',
+  loader.includes('catch {\n    return null;')                                  // the one fetch seam
+  && loader.includes("inputs ? compileMindContext({ ...inputs, budgetChars: opts.budgetChars }) : ''")  // string form
+  && loader.includes(": { stable: '', volatile: '' }"));                        // cache-split form (SW2.3)
 
 console.log(`\nmindContextRun.verify: ${passed} passed, ${failed} failed`);
 if (failed) throw new Error(`${failed} mind context checks failed`);

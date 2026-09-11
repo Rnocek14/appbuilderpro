@@ -44,6 +44,7 @@ export async function createContentWeekOrder(input: { worldId: string; config: C
     id: r.id as string, kind: 'content_week', label: r.label as string, cadence: 'weekly',
     config: (r.config as Record<string, unknown>) ?? {}, status: r.status as 'active' | 'paused',
     nextRunAt: r.next_run_at as string, lastRunAt: (r.last_run_at as string | null), lastResult: null,
+    consecutiveFailures: 0, lastError: null,   // a just-created order has no failure history
   };
 }
 

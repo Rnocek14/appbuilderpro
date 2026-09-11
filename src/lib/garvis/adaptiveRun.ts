@@ -36,11 +36,10 @@ export interface AdaptiveRead {
   spendByChannel: Record<string, number>;
 }
 
-/** Build the honest channel table from real rows and run the engine. Pure math over counts —
- *  the only judgment calls (sample floors, confidence tiers) live verified in adaptive.ts.
- *  Spend source preference: API-synced platform spend (ad_metrics) over the manual log when both
- *  exist for a channel — same money, the API count is the fresher record; never summed together. */
-export async function readAdaptive(worldId: string): Promise<AdaptiveRead> {
+/** Assemble the honest channel table for ONE world — the shared substrate for readAdaptive and
+ *  the cross-venture engine (SW10.11), so a transfer recommendation and a world's own read can
+ *  never disagree about what the rows say. */
+export async function assembleChannels(worldId: string): Promise<{ channels: ChannelIn[]; results: ChannelResults; spendByChannel: Record<string, number> }> {
   const [results, spends, metricsQ] = await Promise.all([
     worldResults(worldId), listAdSpends(worldId),
     supabase.from('ad_metrics').select('provider, spend_usd').eq('world_id', worldId).limit(2000),
@@ -97,9 +96,28 @@ export async function readAdaptive(worldId: string): Promise<AdaptiveRead> {
       spendUsd: spendByChannel['google ads'] ?? null,
       instrumented: results.site !== null,
     },
+    // SOCIAL joins the measured world (SW10.11): posts that really went out, engagement from the
+    // SYNCED metrics only — never-synced metrics mean the channel ran blind (instrumented=false),
+    // which is exactly what lets a measured recommendation ever say "instrument social".
+    {
+      name: 'social',
+      out: results.social?.posts ?? 0, outLabel: 'posts',
+      responses: results.social?.synced ? results.social.engagements : 0, responseLabel: 'engagements',
+      spendUsd: spendByChannel['social'] ?? null,
+      instrumented: results.social?.synced ?? false,
+    },
     // Ad channels with spend logged but no attributed visits are running blind (or untagged).
   ].filter((c) => c.out > 0 || c.responses > 0 || (c.spendUsd ?? 0) > 0 || ['email', 'direct mail', 'website (organic/direct)'].includes(c.name));
 
+  return { channels, results, spendByChannel };
+}
+
+/** Build the honest channel table from real rows and run the engine. Pure math over counts —
+ *  the only judgment calls (sample floors, confidence tiers) live verified in adaptive.ts.
+ *  Spend source preference: API-synced platform spend (ad_metrics) over the manual log when both
+ *  exist for a channel — same money, the API count is the fresher record; never summed together. */
+export async function readAdaptive(worldId: string): Promise<AdaptiveRead> {
+  const { channels, results, spendByChannel } = await assembleChannels(worldId);
   const recs = adapt(channels);
   const facts = channelFacts(channels);
 

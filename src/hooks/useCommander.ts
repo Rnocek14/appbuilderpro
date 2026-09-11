@@ -190,7 +190,7 @@ export function useCommander() {
       const r = await rawComplete([
         { role: 'system', content: COMMANDER_SYSTEM },
         { role: 'user', content: buildCommanderUser(text, snapshot, history, mind) },
-      ], 1000);
+      ], 2000);   // fed brain (SW2.3): headroom for grounded multi-part answers
       const cmd = parseCommand(r.text);
 
       if (cmd.kind === 'reply') {

@@ -12,6 +12,7 @@ interface OrderRow {
   id: string; world_id: string | null; kind: OrderKind; label: string; cadence: Cadence;
   config: { url?: string; note?: string; [k: string]: unknown } | null; status: 'active' | 'paused';
   anchor_at: string; next_run_at: string; last_run_at: string | null; last_result: WatchResult | null;
+  consecutive_failures: number | null; last_error: string | null;
 }
 
 function toOrder(r: OrderRow): StandingOrder {
@@ -19,12 +20,13 @@ function toOrder(r: OrderRow): StandingOrder {
     id: r.id, kind: r.kind, label: r.label, cadence: r.cadence,
     config: r.config ?? {}, status: r.status,
     nextRunAt: r.next_run_at, lastRunAt: r.last_run_at, lastResult: r.last_result,
+    consecutiveFailures: r.consecutive_failures ?? 0, lastError: r.last_error,
   };
 }
 
 export async function listOrders(worldId?: string): Promise<StandingOrder[]> {
   let q = supabase.from('standing_orders')
-    .select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result')
+    .select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result, consecutive_failures, last_error')
     .order('created_at', { ascending: false }).limit(50);
   if (worldId) q = q.eq('world_id', worldId);
   const { data, error } = await q;
@@ -103,7 +105,12 @@ export async function createAreaStudyOrder(input: { niche: string; areaLabel: st
 }
 
 export async function setOrderStatus(id: string, status: 'active' | 'paused'): Promise<void> {
-  const { error } = await supabase.from('standing_orders').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+  // Resuming clears the breaker (app_0140): pressing Play means "try again fresh" — a stale
+  // streak must not re-pause the order on its first hiccup after the operator fixed the cause.
+  const patch = status === 'active'
+    ? { status, consecutive_failures: 0, last_error: null, last_error_at: null, updated_at: new Date().toISOString() }
+    : { status, updated_at: new Date().toISOString() };
+  const { error } = await supabase.from('standing_orders').update(patch).eq('id', id);
   if (error) throw new Error(error.message);
 }
 

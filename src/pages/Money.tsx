@@ -6,20 +6,49 @@
 // own confirmation, and every outgoing email waits in the queue.
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { ClientBillingContent } from './ClientBilling';
+import { cn } from '../lib/utils';
 import { ClockStatus } from '../components/garvis/ClockStatus';
-import { CircleDollarSign, Plus, Send, Check, Ban, Loader2 } from 'lucide-react';
+import { CircleDollarSign, Plus, Send, Check, Ban, Loader2, Link2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Button, Input, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { invoiceTotal, chaseStage, type LineItem } from '../lib/garvis/money';
-import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, unmarkInvoicePaid, voidInvoice, unvoidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
+import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, unmarkInvoicePaid, voidInvoice, unvoidInvoice, createPaymentLink, type InvoiceRow } from '../lib/garvis/moneyRun';
 import { supabase } from '../lib/supabase';
 
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 const STAGE_LABEL = ['', 'reminder queued window', 'due', 'past due', 'final notice'];
 
 export default function Money() {
+  // ONE revenue room (SW2.6): personal invoices and the client book are two tabs of one Money
+  // door (the Memory.tsx merge pattern). ?tab=clients deep-links the book; the old
+  // /garvis/client-billing route redirects here with its prefills intact.
+  const [params, setParams] = useSearchParams();
+  const [tab, setTabState] = useState<'invoices' | 'clients'>(params.get('tab') === 'clients' ? 'clients' : 'invoices');
+  useEffect(() => {
+    const t = params.get('tab');
+    if (t === 'clients' || t === 'invoices') setTabState(t);
+    else if (t === null) setTabState('invoices');
+  }, [params]);
+  const setTab = (t: 'invoices' | 'clients') => {
+    setTabState(t);
+    const next = new URLSearchParams(params);
+    if (t === 'clients') next.set('tab', 'clients'); else next.delete('tab');
+    setParams(next, { replace: true });
+  };
+  const tabStrip = (
+    <div className="flex shrink-0 rounded-lg border border-forge-border p-0.5 text-xs">
+      {([['invoices', 'Invoices'], ['clients', 'Client book']] as const).map(([key, label]) => (
+        <button key={key} onClick={() => setTab(key)}
+          className={cn('rounded-md px-3 py-1.5', tab === key ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim hover:text-forge-ink')}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
   const { toast } = useToast();
   const { offerUndo, undoBar } = useUndoBar((e) => toast('error', e instanceof Error ? e.message : 'Could not undo that.'));
   const [rows, setRows] = useState<InvoiceRow[]>([]);
@@ -76,9 +105,48 @@ export default function Money() {
     finally { setBusyId(null); }
   };
 
+  // The pay-link button (SW7.1): mint once, copy every time after. A paid link marks the invoice
+  // itself via the Stripe webhook — hand-paste into the create form stays as the fallback.
+  const payLink = async (r: InvoiceRow) => {
+    if (r.payment_url) {
+      try { await navigator.clipboard.writeText(r.payment_url); toast('success', 'Payment link copied.'); }
+      catch { toast('error', r.payment_url); }
+      return;
+    }
+    setBusyId(r.id);
+    try {
+      const res = await createPaymentLink(r.id);
+      if (!res.available) { toast('error', res.error ?? 'Stripe isn\'t connected.'); return; }
+      setRows((cur) => cur.map((x) => (x.id === r.id ? { ...x, payment_url: res.url } : x)));
+      try { await navigator.clipboard.writeText(res.url ?? ''); } catch { /* the row keeps the link */ }
+      toast('success', 'Payment link created & copied — when it\'s paid, the invoice marks itself.');
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not create the payment link.'); }
+    finally { setBusyId(null); }
+  };
+
   const now = new Date();
   const outstanding = rows.filter((r) => r.status === 'sent').reduce((s, r) => s + Number(r.amount_usd), 0);
   const collected = rows.filter((r) => r.status === 'paid').reduce((s, r) => s + Number(r.amount_usd), 0);
+
+  if (tab === 'clients') {
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-4xl px-4 pt-8">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-forge-border bg-forge-panel">
+              <CircleDollarSign size={20} className="text-forge-ember" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl font-semibold text-forge-ink">Money</h1>
+              <p className="text-sm text-forge-dim">Your client book — subscriptions, payment links, MRR.</p>
+            </div>
+            {tabStrip}
+          </div>
+        </div>
+        <ClientBillingContent />
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
@@ -91,6 +159,7 @@ export default function Money() {
             <h1 className="text-xl font-semibold text-forge-ink">Money</h1>
             <p className="text-sm text-forge-dim">Invoice → gated send → the chaser asks so you don't have to → paid = real revenue.</p>
           </div>
+          {tabStrip}
 
         {/* The chase ladder runs on the clock — if the clock is dead, say so here (quiet when healthy). */}
         <ClockStatus quiet />
@@ -191,9 +260,19 @@ export default function Money() {
                       {/* Provenance (app_0086): revenue that knows where it came from. 'manual' is the default door — no chip. */}
                       {r.source === 'garvis_tool' && <span className="ml-1.5 rounded border border-forge-border px-1 py-px text-[10px]">via Garvis</span>}
                       {r.source === 'won_deal' && <span className="ml-1.5 rounded border border-forge-ok/40 px-1 py-px text-[10px] text-forge-ok">won deal</span>}
+                      {/* Reconciled payments say so (app_0146) — "paid" by your hand and "paid" by Stripe are different facts. */}
+                      {r.status === 'paid' && r.paid_via === 'stripe' && <span className="ml-1.5 rounded border border-forge-ok/40 px-1 py-px text-[10px] text-forge-ok">paid via Stripe</span>}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
+                    {(r.status === 'draft' || r.status === 'sent') && (
+                      <button disabled={busyId === r.id}
+                        title={r.payment_url ? 'Copy the payment link' : 'Create a Stripe payment link — a paid link marks this invoice itself'}
+                        onClick={() => void payLink(r)}
+                        className="flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-dim hover:text-forge-ink disabled:opacity-50">
+                        {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Link2 size={12} />} {r.payment_url ? 'Copy link' : 'Pay link'}
+                      </button>
+                    )}
                     {r.status === 'draft' && (
                       <button disabled={busyId === r.id} onClick={() => void act(r.id, () => queueInvoiceSend(r), 'Invoice queued — approve the send in the Queue.', { status: 'sent' })}
                         className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-xs text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">

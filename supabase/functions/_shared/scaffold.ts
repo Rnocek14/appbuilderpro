@@ -9,7 +9,8 @@ export interface ScaffoldFile { path: string; content: string }
 
 // The curated dependency set generated apps may import. Keep in sync with the allow-list
 // in the generation/edit prompts (prompts.ts).
-const PACKAGE_JSON = `{
+// Exported so depRegistry.verify.ts can hold these ranges to the registry's exact pins.
+export const PACKAGE_JSON = `{
   "name": "fableforge-app",
   "private": true,
   "version": "0.0.0",

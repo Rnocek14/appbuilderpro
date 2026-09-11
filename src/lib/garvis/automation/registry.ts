@@ -8,7 +8,7 @@
 // a roadmap GAP and NEVER proposed. This is what stops the system over-promising — the same
 // discipline as siteAudit's "no faked scores." Pure data + pure helpers (verified by detect.verify.ts).
 
-import type { Vertical } from '../verticals';
+import type { Vertical } from '../verticals.ts';
 
 export type Rail =
   | 'send-email' | 'outreach-followups' | 'outreach-reactivate' | 'invoice-chase'

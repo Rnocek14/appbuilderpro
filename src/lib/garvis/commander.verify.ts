@@ -1,7 +1,7 @@
 // src/lib/garvis/commander.verify.ts
 // Standalone verification of the Commander dispatcher pure helpers (run: `npm run verify:commander`).
 
-import { commanderSnag, parseCommand, buildCommanderUser, COMMANDER_SYSTEM } from './commander';
+import { commanderSnag, parseCommand, buildCommanderUser, COMMANDER_SYSTEM, postureOf } from './commander';
 
 let passed = 0;
 let failed = 0;
@@ -54,6 +54,29 @@ check('network/edge failures name the real fix',
 check('operator-language messages pass through untouched',
   commanderSnag(new Error('Out of credits for this billing period — top up on Subscription.')) === 'Out of credits for this billing period — top up on Subscription.');
 check('non-Error throws never crash the translator', commanderSnag(undefined).length > 0);
+
+// ---- the Intention Router's posture axis (SW4.1): total, tolerant, and defaulted by kind ----
+check('a valid model-supplied posture rides through',
+  postureOf(parseCommand('{"kind":"reply","text":"Revenue is $4,200.","posture":"observe"}')) === 'observe');
+check('a garbage posture is dropped, never trusted',
+  postureOf(parseCommand('{"kind":"reply","text":"hi","posture":"panic"}')) === 'think');
+check('every kind resolves a posture WITHOUT the model supplying one', ([
+  ['{"kind":"reply","text":"hi"}', 'think'],
+  ['{"kind":"mission","preface":"p","objective":"o","subject":"s","app":null}', 'execute'],
+  ['{"kind":"act","preface":"p","instruction":"i"}', 'execute'],
+  ['{"kind":"open","preface":"p","surface":"mailer","world":null}', 'create'],
+  ['{"kind":"build","preface":"p","prompt":"x"}', 'create'],
+  ['{"kind":"explore","query":"q","preface":"p"}', 'think'],
+] as const).every(([raw, want]) => postureOf(parseCommand(raw)) === want));
+check('an unparseable reply still has a posture (total)', postureOf(parseCommand('not json at all')) === 'think');
+check('the prompt teaches all four postures',
+  ['"think"', '"create"', '"execute"', '"observe"'].every((p) => COMMANDER_SYSTEM.includes(p)));
+check('every schema line carries the posture field',
+  (COMMANDER_SYSTEM.match(/"posture":"…"/g) ?? []).length === 6);
+check('a mission keeps its fields alongside the posture', (() => {
+  const m = parseCommand('{"kind":"mission","preface":"On it.","objective":"Grow X","subject":"X","app":null,"posture":"execute"}');
+  return m.kind === 'mission' && m.objective === 'Grow X' && postureOf(m) === 'execute';
+})());
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} commander check(s) failed`);

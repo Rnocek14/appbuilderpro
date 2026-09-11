@@ -192,6 +192,14 @@ Deno.serve(async (req) => {
     releaseExecutionClaim = null;
     await ledger('ok', null, { url, site_id: site, state });
 
+    // SHIP→MARKET SEAM (SW5.3): a live site that nothing points at earns nothing. The event
+    // below is what the waking moment's collector reads — deploy and marketing stop being
+    // strangers. Best-effort: a ledger hiccup never fails a real deploy.
+    await admin.from('mind_events').insert({
+      owner_id: user.id, event_type: 'note', source: 'execution',
+      subject: `Site deployed: ${url}`,
+      payload: { kind: 'site_deployed', url, site_id: site, project_id: projectId, state },
+    }).then(() => {}, () => {});
     return json({ ok: true, siteId: site, url, state, uploaded: toUpload.length });
   } catch (e) {
     await releaseExecutionClaim?.({ error: e instanceof Error ? e.message.slice(0, 500) : String(e).slice(0, 500) }).catch(() => {});

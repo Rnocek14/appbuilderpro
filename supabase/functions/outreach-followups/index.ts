@@ -17,6 +17,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
@@ -195,7 +196,7 @@ Deno.serve(async (req) => {
     if (newMsg) {
       // Earned autonomy (app_0097): a granted 'followup' class self-approves under its daily
       // cap and executes through the one send path (every gate re-runs there). Otherwise: pending.
-      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup');
+      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup', { kind: 'send_email', recipientKnown: true });
       const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
       if (auto) apPayload.autonomy_class = 'followup';
       const { data: apRow } = await admin.from('approvals').insert({
@@ -206,6 +207,7 @@ Deno.serve(async (req) => {
         title: `Follow-up #${n} to ${first.to_address}`,
         preview: `${draft.subject}\n\n${draft.body}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
       }).select('id').single();
       if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       drafted++;
@@ -270,7 +272,7 @@ Deno.serve(async (req) => {
     // Enqueue the approval (never auto-send). The signal is stated HERE, to the owner — never in
     // the email itself.
     if (newMsg) {
-      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup');
+      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup', { kind: 'send_email', recipientKnown: true });
       const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
       if (auto) apPayload.autonomy_class = 'followup';
       const { data: apRow } = await admin.from('approvals').insert({
@@ -281,6 +283,7 @@ Deno.serve(async (req) => {
         title: `Follow-up (opened ${m.open_count}×, no reply) to ${m.to_address}`,
         preview: `SIGNAL: they opened the last email ${m.open_count} times and never replied.\n\n${draft.subject}\n\n${draft.body}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
       }).select('id').single();
       if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       hotDrafted++;

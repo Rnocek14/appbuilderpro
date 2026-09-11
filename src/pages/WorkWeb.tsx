@@ -37,6 +37,7 @@ import { WorkshopHeader } from '../components/garvis/WorkshopHeader';
 import { ADS_SPEC } from '../lib/garvis/adsStudio';
 import { COPY_SPEC } from '../lib/garvis/copyStudio';
 import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
+import { StrategiesPanel } from '../components/garvis/StrategiesPanel';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { VerdictReadout } from '../components/garvis/VerdictReadout';
 import { AskGarvis } from '../components/garvis/AskGarvis';
@@ -211,7 +212,7 @@ export default function WorkWeb() {
   // applied here too (review finding #1).
   // Which preamble panel (goal / standing orders / ask) is expanded — closed by default so the
   // page opens on the WORK (whole-platform simplicity audit).
-  const [preamble, setPreamble] = useState<'goal' | 'orders' | 'ask' | null>(null);
+  const [preamble, setPreamble] = useState<'goal' | 'orders' | 'ask' | 'strategies' | null>(null);
   const growthDesk = useMemo(() => !!web
     && web.clusters.some((c) => c.charter?.flavor === 'content_growth')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
@@ -458,7 +459,7 @@ export default function WorkWeb() {
             actual work under five panels of options. One thin strip now; each expands on demand.
             Nothing was removed: same panels, one click away, closed by default. */}
         <div className="mb-4 flex flex-wrap items-center gap-1.5 text-[11px]">
-          {([['goal', 'The goal'], ['orders', 'Standing orders'], ['ask', `Ask about ${web.title}`]] as const).map(([id, label]) => (
+          {([['goal', 'The goal'], ['strategies', 'Strategies'], ['orders', 'Standing orders'], ['ask', `Ask about ${web.title}`]] as const).map(([id, label]) => (
             <button key={id} onClick={() => setPreamble(preamble === id ? null : id)}
               className={cn('rounded-lg border px-2.5 py-1 transition-colors', preamble === id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink')}>
               {label}
@@ -468,6 +469,11 @@ export default function WorkWeb() {
         {preamble === 'goal' && (
           <div className="mb-4">
             <WorldGoalPanel worldId={worldId} />
+          </div>
+        )}
+        {preamble === 'strategies' && (
+          <div className="mb-4">
+            <StrategiesPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
           </div>
         )}
         {preamble === 'orders' && (

@@ -12,7 +12,7 @@
 //     no recognizable real people, no brand logos) — illustration, never fabricated "footage" of a
 //     real person, product, or place. Provenance is stamped at generation; disclosure at publish.
 
-import type { SceneInput } from './storyboard';
+import type { SceneInput } from './storyboard.ts';
 
 export interface FactSource { claim: string; url: string; note?: string }
 export interface FactScene {

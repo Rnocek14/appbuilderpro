@@ -154,14 +154,22 @@ export async function runAgent(opts: {
 
     const results: unknown[] = [];
     for (const tu of toolUses) {
-      let output: string;
+      let output: string | { text: string; imageBase64?: string | null; imageMediaType?: string };
       try {
         output = await executeAgentTool(tu.name ?? '', tu.input ?? {}, opts.ctx);
       } catch (e) {
         output = `Error running ${tu.name}: ${e instanceof Error ? e.message : String(e)}`;
       }
-      if (tu.name === 'run_typecheck') verified = /(^|\s)(clean|no (type )?errors|0 error)/i.test(output);
-      results.push({ type: 'tool_result', tool_use_id: tu.id, content: output });
+      const out = typeof output === 'string' ? { text: output } : output;
+      if (tu.name === 'run_typecheck') verified = /(^|\s)(clean|no (type )?errors|0 error)/i.test(out.text);
+      // Image-bearing results (see_preview, SW9.6) ride as content BLOCKS — the model literally
+      // sees the screenshot; text-only results stay plain strings exactly as before.
+      results.push({
+        type: 'tool_result', tool_use_id: tu.id,
+        content: out.imageBase64
+          ? [{ type: 'text', text: out.text }, { type: 'image', source: { type: 'base64', media_type: out.imageMediaType ?? 'image/jpeg', data: out.imageBase64 } }]
+          : out.text,
+      });
     }
     messages.push({ role: 'user', content: results });
   }

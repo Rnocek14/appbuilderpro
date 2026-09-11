@@ -2,7 +2,7 @@
 // Client-side AI service layer.
 //
 // PRODUCTION MODE (default): all model calls go through Supabase Edge Functions
-// (generate-app, chat-edit). Provider keys live in edge function secrets and never
+// (chat-edit, agent-turn). Provider keys live in edge function secrets and never
 // reach the browser. Usage, cost, and audit records are written server-side.
 //
 // DIRECT MODE (VITE_AI_DIRECT=true): for local hacking without deploying edge
@@ -27,8 +27,13 @@ import { previewContext } from './previewRuntime';
 import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
 import { PREFERENCE_DISTILL_SYSTEM, DIRECTIONS_SYSTEM, directionPickPrompt, singleDirectionPrompt, filesPromptChunk } from './prompts';
 import { parseProtocol } from '../../supabase/functions/_shared/streamparse';
+import { driveFiles, integrationManifest, pagesFromAppTsx } from '../../supabase/functions/_shared/generateDriver';
 import { recordUsage, tagUsageSince, estimateCost } from './usage';
-import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
+import { agenticEdit, agenticVerifyAndFix, generationCompileGate, type CompileGateResult } from './agent/edit';
+import { verificationFromGate, verificationLabel, verificationNote } from './verification';
+import { extractRoutePaths, probeFixRequest, probeSummary } from './renderProbe';
+import { probeRoutes } from './renderProbeRun';
+import { runtimeQa, runtimeQaFixRequest, runtimeQaLine, runtimeQaDisclosure } from './runtimeQa';
 import { agentAvailable } from './agent/loop';
 
 interface Usage { inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
@@ -144,10 +149,10 @@ export interface EditResult {
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   // ONE pipeline, always: the chunked client orchestrator — shell first, then every page in
   // PARALLEL against frozen contracts, schema concurrent, compile-verify + agentic repair inline.
-  // The edge `generate-app` function used to serve "edge mode + browser key" with a single serial
+  // A `generate-app` edge function once served "edge mode + browser key" with a single serial
   // 32k-token stream and static-QA-only healing — a strictly weaker build whose quality silently
-  // depended on which path you hit. Retired: every environment now gets the good pipeline (cloud
-  // users' model calls already relay through agent-turn, so no browser key is required).
+  // depended on which path you hit. Retired and DELETED (Aug 2026): every environment gets the
+  // good pipeline (cloud users' model calls already relay through agent-turn, no browser key).
   return chunkedGenerate(projectId, prompt, planContext);
 }
 
@@ -456,8 +461,40 @@ export async function sendEdit(
   }
   // Both classic paths stream so the UI can render the edit landing file-by-file.
   // reviewMode (review-before-write) is direct-mode only for now; the edge path applies as before.
-  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, reviewMode, signal);
-  return edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, signal);
+  const classic = DIRECT
+    ? await directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, reviewMode, signal)
+    : await edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, signal);
+
+  // PROVIDER HONESTY (SW3.4): the classic path ships whole-file rewrites with no agent loop —
+  // it must not also skip the compiler and end in silence. Decision recorded in the plan: no
+  // second tool-loop for non-Anthropic providers (that would double-maintain the product's
+  // spine); instead the same compile gate runs after the fact, one static QA repair attempt is
+  // made, and the residual is NAMED in the chat. Verification is an upgrade, never a blocker.
+  if (classic.action === 'edit' && classic.changed.length) {
+    try {
+      let gate = await generationCompileGate(projectId);
+      if (gate.ran && gate.errors > 0) {
+        const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        if (qaErrors.length) {
+          try { await qaFixPass(projectId, qaErrors); gate = await generationCompileGate(projectId); } catch { /* report below */ }
+        }
+      }
+      const v = verificationFromGate(gate);
+      if (v.level === 'compile_failed') {
+        const note = verificationNote(v);
+        onEvent?.({ type: 'activity', text: verificationLabel(v) });
+        const { data: auth } = await supabase.auth.getUser();
+        if (auth.user) {
+          await insertAiMessage({
+            project_id: projectId, user_id: auth.user.id, role: 'assistant',
+            content: note, thread_id: threadId,
+          });
+        }
+        classic.explanation = `${classic.explanation}\n\n${note}`;
+      }
+    } catch { /* the edit already landed; a broken verifier must not eat it */ }
+  }
+  return classic;
 }
 
 // Calls the streaming chat-edit edge function. supabase-js's functions.invoke buffers the
@@ -1100,19 +1137,10 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
 
       // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the
       // secret keys they need (drives the secret-request popup + deploy).
-      const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
-        ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
-        : [];
-      const requiredSecrets: { env: string; service: string; purpose: string; status: 'missing' }[] = [];
-      for (const it of integrations) {
-        const service = typeof it.service === 'string' ? it.service : '';
-        const purpose = typeof it.purpose === 'string' ? it.purpose : '';
-        const secrets = Array.isArray(it.secrets) ? it.secrets : [];
-        for (const s of secrets) if (typeof s === 'string' && s.trim()) requiredSecrets.push({ env: s.trim(), service, purpose, status: 'missing' });
-      }
-      const secretEnvs = [...new Set(requiredSecrets.map((s) => s.env))];
-      const manifestSecrets = secretEnvs.map((env) => requiredSecrets.find((s) => s.env === env)!);
-      const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
+      // The manifest derivation is the SHARED driver's (generateDriver.ts) — parity by import.
+      const { integrations, manifestSecrets } = integrationManifest(blueprint);
+      const secretEnvs = manifestSecrets.map((s) => s.env);
+      const secretServices = [...new Set(manifestSecrets.map((s) => s.service).filter(Boolean))];
       const hasIntegrations = integrations.length > 0;
 
       // SCHEMA IN PARALLEL — whether the app HAS a backend is decided by the blueprint itself
@@ -1157,94 +1185,27 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
       }
 
       const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
-      const written = new Map<string, string>();
-      const upsertFiles = async (changes: { path: string; content: string }[]) => {
-        for (const f of changes) {
-          if (!f.path || !f.content.trim() || reserved.has(f.path) || f.path.startsWith('/src/components/ui/')) continue;
-          await supabase.from('project_files').upsert(
-            { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
-            { onConflict: 'project_id,path' },
-          );
-          written.set(f.path, f.content);
-        }
-      };
 
-      // 1) SHELL — contracts first: one bounded call that always fits the relay. Pages are
-      // generated against these exact contracts next, so cross-file drift can't happen.
-      await mark('file_tree', 'running', 'contracts + shell');
+      // THE SHARED DRIVER (SW9.3): the contracts-first shell, the App.tsx page manifest, the
+      // sliding fan-out, the truncation guards, and the manifest-diff retry all live in
+      // _shared/generateDriver.ts — the SAME core the headless CI probe and the server-side
+      // resume consume. This runtime supplies only its own I/O: metered rawComplete, the
+      // project_files upserts, the stage marks, and its parallelism.
       const bpJson = JSON.stringify(blueprint);
-      const shellRaw = track(await rawComplete([
-        { role: 'system', content: GENERATE_FILES_STREAM },
-        { role: 'user', content: filesPromptStream(bpJson, hasBackend, hasIntegrations) +
-          '\n\nTHIS CALL — CONTRACTS + SHELL ONLY: emit /src/lib types + db.ts' +
-          (hasIntegrations ? ' + api.ts' : '') +
-          ', /src/App.tsx (ALL routes, pages lazy-loaded), shared layout components (shell/nav/footer)' +
-          (hasIntegrations ? ', and the /supabase/functions/* edge functions' : '') +
-          '. Do NOT emit /src/pages/* in this call — each page is generated next against these exact contracts, so App.tsx MAY route to pages not yet emitted (this call only). End with §END.' },
-      ], 12000));
-      let shellChanges = parseProtocol(shellRaw.text).changes;
-      // A max_tokens-cut call leaves its LAST file half-written — never persist half a file
-      // (the missing-module heal in the validate stage recreates it whole).
-      if (shellRaw.stopReason === 'max_tokens' && shellChanges.length && looksTruncated(shellChanges[shellChanges.length - 1].content)) {
-        shellChanges = shellChanges.slice(0, -1);
-      }
-      await upsertFiles(shellChanges);
-      const appTsx = written.get('/src/App.tsx') ?? '';
-      if (!appTsx) throw new Error('The model produced no App.tsx in the shell pass.');
-
-      // 2) PAGE LIST — App.tsx's own ./pages imports are the authoritative manifest.
-      const pagePaths = new Set<string>();
-      const addSpec = (spec: string) => {
-        if (!spec.startsWith('./pages/')) return;
-        let p = '/src/' + spec.slice(2);
-        if (!/\.(t|j)sx?$/.test(p)) p += '.tsx';
-        pagePaths.add(p);
-      };
-      for (const m of appTsx.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) addSpec(m[1]);
-      for (const m of appTsx.matchAll(/(?:^|\n)\s*import[^'"\n]*from\s*['"]([^'"]+)['"]/g)) addSpec(m[1]);
-
-      // 3) CONTRACTS CONTEXT — the verbatim shell every page call compiles against (capped).
-      const contractsContext = [...written.entries()]
-        .filter(([p]) => p.startsWith('/src/'))
-        .map(([p, c]) => `--- ${p} ---\n${c}`)
-        .join('\n\n').slice(0, 60000);
-
-      // 4) PAGES — a SLIDING parallel pool (not batches: a slow page never holds up the next).
-      // Direct mode (browser key) tolerates more parallelism than the metered relay.
       const inFlight = DIRECT && resolveAI().ready ? 6 : 4;
-      const pageList = [...pagePaths].filter((p) => !written.has(p));
-      await mark('file_tree', 'running', `${pageList.length} pages, ${inFlight} in parallel`);
-      const genPage = async (pagePath: string): Promise<void> => {
-        // 9000 tokens/page (was 6000): landing pages with a signature scroll scene + full sections
-        // are big, and quality > speed is the explicit product call. Truncation guards still apply.
-        const r = track(await rawComplete([
-          { role: 'system', content: GENERATE_FILES_STREAM },
-          { role: 'user', content: filesPromptChunk(bpJson, pagePath, contractsContext, hasBackend, hasIntegrations) },
-        ], 9000));
-        let changes = parseProtocol(r.text).changes;
-        // Drop a max_tokens-cut tail file (a page emits its own small components after itself —
-        // a half-written trailing component is worse than a missing one, which the heal recreates).
-        if (r.stopReason === 'max_tokens' && changes.length && looksTruncated(changes[changes.length - 1].content)) {
-          changes = changes.slice(0, -1);
-        }
-        if (!changes.some((c) => c.path === pagePath && c.content.trim())) {
-          throw new Error(`page ${pagePath} was not emitted`);
-        }
-        await upsertFiles(changes);
-        await mark('file_tree', 'running', pagePath.split('/').pop());
-      };
-      {
-        const queue = [...pageList];
-        const worker = async () => { for (let p = queue.shift(); p; p = queue.shift()) await genPage(p).catch(() => undefined); };
-        await Promise.all(Array.from({ length: Math.min(inFlight, queue.length) }, worker));
-      }
-      // 5) MANIFEST DIFF — every routed page must exist; one serial retry per missing page.
-      for (const p of pageList.filter((x) => !written.has(x))) {
-        await mark('file_tree', 'running', `retrying ${p.split('/').pop()}`);
-        await genPage(p).catch(() => undefined);
-      }
-      const stillMissing = pageList.filter((x) => !written.has(x));
-      if (!written.size) throw new Error('The model produced no source files.');
+      const { written, stillMissing } = await driveFiles({
+        complete: async (messages, maxTokens) => track(await rawComplete(messages, maxTokens)),
+        persist: async (changes) => {
+          for (const f of changes) {
+            await supabase.from('project_files').upsert(
+              { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
+              { onConflict: 'project_id,path' },
+            );
+          }
+        },
+        mark: async (stage, status, note) => mark(stage, status, note),
+        parallelism: inFlight,
+      }, { bpJson, hasBackend, hasIntegrations, reserved });
 
       if (hasIntegrations) {
         await supabase.from('project_files').upsert(
@@ -1282,15 +1243,17 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
         } catch { /* best-effort */ }
       }
-      let tsErrors: number | null = null;
+      // Honest verification (SW3.1): the gate reports ran/errors/reason, and the state machine
+      // (src/lib/verification.ts) owns the wording — a compiler that never ran can no longer
+      // walk away wearing 'clean'.
+      let gate: CompileGateResult | null = null;
       if (!qaErrors.length) {
-        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+        try { gate = await generationCompileGate(projectId); } catch { gate = null; }
       }
+      let verification = verificationFromGate(gate);
       await mark('validate', 'done',
-        qaErrors.length ? `${qaErrors.length} issue(s) found`
-          : tsErrors ? `${tsErrors} type error(s) found`
-          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
-      if (qaErrors.length || tsErrors) {
+        qaErrors.length ? `${qaErrors.length} issue(s) found` : verificationLabel(verification));
+      if (qaErrors.length || verification.level === 'compile_failed') {
         await mark('fix', 'running');
         try {
           if (agentAvailable()) {
@@ -1303,16 +1266,65 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           }
         } catch { /* best-effort — report whatever remains below */ }
         qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-        if (tsErrors && agentAvailable()) {
+        if (verification.level === 'compile_failed' && agentAvailable()) {
           // Recount after the agentic repair (the container is warm, so this is a quick tsc).
-          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
+          try { gate = await generationCompileGate(projectId); verification = verificationFromGate(gate); }
+          catch { /* keep the last state */ }
         }
-        const remaining = qaErrors.length + (tsErrors ?? 0);
-        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
+        const remaining = qaErrors.length + (verification.level === 'compile_failed' ? verification.errors : 0);
+        await mark('fix', 'done', remaining ? `${remaining} unresolved` : verificationLabel(verification));
       } else {
         await mark('fix', 'done');
       }
-      const unresolved = qaErrors.length + (tsErrors ?? 0);
+      const unresolved = qaErrors.length + (verification.level === 'compile_failed' ? verification.errors : 0);
+
+      // RENDER PROBE (SW3.3): the app is DRIVEN, not just compiled. Walk every static route in
+      // the live preview, judge what actually renders (uncaught error / blank screen), hand
+      // failures to the agentic fixer once, and report the honest count. Fail-soft throughout:
+      // no live preview or no routes is a named skip, never a fake pass.
+      let probeLine = '';
+      let qaLine = '';
+      let qaDisclosure = '';
+      try {
+        const { data: appRow } = await supabase.from('project_files')
+          .select('content').eq('project_id', projectId).eq('path', '/src/App.tsx')
+          .is('deleted_at', null).maybeSingle();
+        const routes = extractRoutePaths(((appRow as { content?: string } | null)?.content) ?? '');
+        const probe = await probeRoutes(routes);
+        if (!probe.ran) {
+          probeLine = probe.reason ? `Routes unwalked — ${probe.reason}.` : '';
+        } else {
+          let judged = probe.results;
+          // RUNTIME QA (SW9.7): the same static scanners the platform points at prospects' sites,
+          // run over the serialized HTML each route actually rendered. Error-severity findings
+          // join the repair pass; the rest fold into a collapsed disclosure in the summary.
+          let qa = runtimeQa(probe.htmlByRoute);
+          let bad = judged.filter((r) => !r.ok);
+          let qaFix = runtimeQaFixRequest(qa);
+          if ((bad.length || qaFix) && agentAvailable()) {
+            const qaErrs = qa.findings.filter((f) => f.severity === 'error').length;
+            await mark('fix', 'running',
+              [bad.length ? `repairing ${bad.length} broken route(s)` : '', qaErrs ? `${qaErrs} runtime QA finding(s)` : '']
+                .filter(Boolean).join(', '));
+            try {
+              await agenticVerifyAndFix(projectId, {
+                onActivity: (l) => void mark('fix', 'running', l),
+                focus: [probeFixRequest(judged), qaFix].filter(Boolean).join('\n\n'),
+              });
+              const again = await probeRoutes(routes);
+              if (again.ran) {
+                judged = again.results; bad = judged.filter((r) => !r.ok);
+                qa = runtimeQa(again.htmlByRoute); qaFix = runtimeQaFixRequest(qa);
+              }
+            } catch { /* the honest count below reports whatever remains */ }
+            await mark('fix', 'done',
+              bad.length ? `${bad.length} route(s) still broken` : qaFix ? 'runtime QA findings remain' : 'routes repaired');
+          }
+          probeLine = probeSummary(judged);
+          qaLine = runtimeQaLine(qa);
+          qaDisclosure = runtimeQaDisclosure(qa);
+        }
+      } catch { /* the probe is an upgrade, never a blocker */ }
 
       await mark('summarize', 'running');
       const genAi = resolveAI();
@@ -1326,7 +1338,11 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           ` Open the preview to try it, then keep iterating in chat.` +
           (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
           (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
+          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.`
+            : `\n\n${verificationNote(verification)}`) +
+          (probeLine ? `\n${/broken|unwalked/i.test(probeLine) ? '⚠️ ' : ''}Route walk: ${probeLine}` : '') +
+          (qaLine ? `\n${/to fix/.test(qaLine) ? '⚠️ ' : ''}${qaLine}` : '') +
+          (qaDisclosure ? `\n\n${qaDisclosure}` : ''),
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });
@@ -1401,17 +1417,8 @@ export async function resumeGeneration(projectId: string): Promise<{ generationI
     };
   }
 
-  // Same manifest rule as generation: App.tsx's ./pages imports are authoritative.
-  const pagePaths = new Set<string>();
-  const addSpec = (spec: string) => {
-    if (!spec.startsWith('./pages/')) return;
-    let p = '/src/' + spec.slice(2);
-    if (!/\.(t|j)sx?$/.test(p)) p += '.tsx';
-    pagePaths.add(p);
-  };
-  for (const m of appTsx.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) addSpec(m[1]);
-  for (const m of appTsx.matchAll(/(?:^|\n)\s*import[^'"\n]*from\s*['"]([^'"]+)['"]/g)) addSpec(m[1]);
-  const missing = [...pagePaths].filter((p) => !files.get(p)?.trim());
+  // Same manifest rule as generation — the ONE implementation (generateDriver.pagesFromAppTsx).
+  const missing = pagesFromAppTsx(appTsx).filter((p) => !files.get(p)?.trim());
 
   const { data: gen } = await supabase.from('project_generations')
     .insert({ project_id: projectId, user_id: userId, prompt: `Resume — ${missing.length} missing page(s)`, kind: 'create', status: 'running' })
@@ -1485,12 +1492,13 @@ export async function resumeGeneration(projectId: string): Promise<{ generationI
           if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
         } catch { /* best-effort */ }
       }
-      let tsErrors: number | null = null;
+      let resumeGate: CompileGateResult | null = null;
       if (!qaErrors.length) {
-        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+        try { resumeGate = await generationCompileGate(projectId); } catch { resumeGate = null; }
       }
-      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s)` : tsErrors ? `${tsErrors} type error(s)` : 'clean');
-      if (qaErrors.length || tsErrors) {
+      const resumeVerification = verificationFromGate(resumeGate);
+      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s)` : verificationLabel(resumeVerification));
+      if (qaErrors.length || resumeVerification.level === 'compile_failed') {
         await mark('fix', 'running');
         try {
           if (agentAvailable()) await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });

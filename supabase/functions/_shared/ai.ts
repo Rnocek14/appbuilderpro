@@ -23,6 +23,10 @@ export interface AIResult {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Why generation stopped, normalized: 'max_tokens' = the output was CUT — callers persisting
+   *  files must drop a truncated tail rather than half-persist it. Optional: only complete()
+   *  populates it today. */
+  stopReason?: string | null;
 }
 
 // $ per 1M tokens — adjust in one place
@@ -59,6 +63,24 @@ export function modelForPlan(plan: string | null | undefined): { provider: AIPro
     local: cfg.model,
   };
   return { provider: cfg.provider, model: Deno.env.get('AI_FREE_MODEL') ?? cheapest[cfg.provider] ?? cfg.model };
+}
+
+/** The BRAIN tier (best-in-class plan SW2.4): judgment-path calls — the deep concierge brain,
+ *  cluster synthesis — may run a stronger model than the bulk default, set via the
+ *  AI_BRAIN_MODEL secret. Unset = byte-identical to modelForPlan, so this seam costs nothing
+ *  until the operator opts in. Free plans keep the cheap tier regardless (the upgrade is paid
+ *  judgment, not free-tier burn), and every call stays behind checkCredits/spendCredits — the
+ *  app_0127 kill switch and dollar caps bound whatever model this resolves. */
+export function brainModelForPlan(plan: string | null | undefined): { provider: AIProvider; model: string } {
+  const base = modelForPlan(plan);
+  if (plan !== 'pro' && plan !== 'starter') return base;
+  const brain = Deno.env.get('AI_BRAIN_MODEL')?.trim();
+  if (!brain) return base;
+  // Same provider-compatibility guard the premium seam uses: a mismatched override is ignored
+  // loudly rather than sent to the wrong API.
+  const compatible = base.provider === 'anthropic' ? /^claude/i.test(brain) : !/^claude/i.test(brain);
+  if (!compatible) { console.warn(`AI_BRAIN_MODEL ${brain} incompatible with provider ${base.provider} — ignored`); return base; }
+  return { provider: base.provider, model: brain };
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
@@ -125,7 +147,7 @@ export async function complete(
       const inTok = (data.usage?.input_tokens ?? 0) + cacheWrite + cacheRead;
       const outTok = data.usage?.output_tokens ?? 0;
       const billedIn = (data.usage?.input_tokens ?? 0) + Math.round(cacheWrite * 1.25) + Math.round(cacheRead * 0.1);
-      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, billedIn, outTok) };
+      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, billedIn, outTok), stopReason: data.stop_reason ?? null };
     }
 
     // OpenAI-compatible providers
@@ -152,6 +174,8 @@ export async function complete(
       inputTokens: inTok,
       outputTokens: outTok,
       costUsd: estimateCost(model, inTok, outTok),
+      // OpenAI's 'length' is the cut-output signal — normalized to the anthropic name.
+      stopReason: data.choices?.[0]?.finish_reason === 'length' ? 'max_tokens' : (data.choices?.[0]?.finish_reason ?? null),
     };
   });
 }

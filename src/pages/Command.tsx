@@ -201,12 +201,21 @@ export default function Command() {
           <Button onClick={submit} loading={thinking} disabled={!input.trim()}><Send size={15} /></Button>
         </div>
         {/* The workshop door stays reachable, demoted to a whisper — one first move above it. */}
-        <button
-          onClick={() => navigate('/garvis/workshops')}
-          className="mt-2 self-start text-xs text-forge-dim transition-colors hover:text-forge-ink"
-        >
-          Or open a workshop →
-        </button>
+        <div className="mt-2 flex items-center gap-4 self-start">
+          <button
+            onClick={() => navigate('/garvis/workshops')}
+            className="text-xs text-forge-dim transition-colors hover:text-forge-ink"
+          >
+            Or open a workshop →
+          </button>
+          {/* The Field's door (SW10.8): explicit, quiet, and removable at the 10.10 checkpoint. */}
+          <button
+            onClick={() => navigate('/garvis/field')}
+            className="text-xs text-forge-dim transition-colors hover:text-forge-ink"
+          >
+            The Field (preview) →
+          </button>
+        </div>
       </div>
 
       {canvas && (

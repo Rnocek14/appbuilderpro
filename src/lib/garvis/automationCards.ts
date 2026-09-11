@@ -141,14 +141,14 @@ export const HEARTBEAT_CARDS: Record<(typeof EXPECTED_JOBS)[number], AutomationC
     sop: ['Find contacts quiet past the reactivation window', 'Draft a warm, specific check-in each', 'Queue each draft → waits for your approval'],
     killSwitch: 'System health → Master switch', doneBy: 'outreach-reactivate',
   },
-  'garvis-consolidate-weekly': {
-    id: 'garvis-consolidate-weekly', name: 'Memory consolidation', when: 'Every week',
-    does: 'Tidies each world\'s knowledge — merges duplicates, promotes what mattered, archives what died.',
-    replaces: 'Manual knowledge-base gardening.',
+  'garvis-consolidate-nightly': {
+    id: 'garvis-consolidate-nightly', name: 'Memory consolidation', when: 'Every night',
+    does: 'Reads the new events into candidate lessons, closes elapsed predictions against real reply records, and links cited events to the beliefs they bear on.',
+    replaces: 'Manual journal review and belief bookkeeping.',
     rung: 'runs',
-    human: 'Structure changes surface for review; nothing is deleted silently.',
-    never: 'Never destroys content — archived is recoverable, deletions need you.',
-    sop: ['Scan each world\'s knowledge graph', 'Propose merges and promotions', 'Apply the safe ones; queue the rest for review'],
+    human: 'Lessons land as proposals for your review; every belief link cites verbatim events you can re-check.',
+    never: 'Never acts on its own lessons — proposals wait for your approval, and a citation that isn\'t verbatim is dropped, not guessed.',
+    sop: ['Close elapsed predictions against the real reply records', 'Read the events that landed since the last run', 'Draft candidate lessons grounded only in those events', 'Verify every belief citation verbatim; drop the rest', 'File the lessons as proposals for your review'],
     killSwitch: 'System health → Master switch', doneBy: 'garvis-consolidate',
   },
   'garvis-social-sync': {
@@ -180,6 +180,16 @@ export const HEARTBEAT_CARDS: Record<(typeof EXPECTED_JOBS)[number], AutomationC
     never: 'Never publishes or sends anything from the feed.',
     sop: ['Fetch listings changed since the last sync', 'Update the local market data', 'Record the sync result'],
     killSwitch: 'System health → Master switch', doneBy: 'mls-sync',
+  },
+  'garvis-embed-sweep': {
+    id: 'garvis-embed-sweep', name: 'Overnight connection sweep', when: 'Every night',
+    does: 'Indexes any knowledge that has no vector yet and files a note when two pieces of your material are genuinely related.',
+    replaces: 'Manually re-reading old material to spot what connects.',
+    rung: 'runs',
+    human: 'Connections land as suggestions on the shelf; linking them stays yours.',
+    never: 'Never sends or posts anything — similarity is measured or the connection is not filed.',
+    sop: ['Find material with no vector', 'Index it into the vector brain', 'Compare against what exists; file only strong matches'],
+    killSwitch: 'System health → Master switch', doneBy: 'embed-sweep',
   },
 };
 

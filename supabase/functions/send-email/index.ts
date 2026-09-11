@@ -16,6 +16,9 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
+import { openSendPrediction } from '../_shared/predictionSrv.ts';
+import { findShortenedLinks } from '../_shared/emailPlacementCore.ts';
+import { serviceKey } from '../_shared/connections.ts';
 import { senderDomainBlockReason, type DomainStatus } from '../../../src/lib/garvis/email/senderDomain.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -45,6 +48,9 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
+  // Deep review 2026-08 #10: an unexpected throw after claiming must RELEASE the claim — set
+  // once the claim lands, cleared after the durable success stamp, drained in the catch.
+  let releaseOnThrow: (() => PromiseLike<unknown>) | null = null;
   try {
     const { approval_id } = (await req.json().catch(() => ({}))) as { approval_id?: string };
     if (!approval_id) return json({ error: 'approval_id is required.' }, 400);
@@ -90,8 +96,10 @@ Deno.serve(async (req) => {
     const messageId = (approval.payload as { message_id?: string })?.message_id;
     if (!messageId) return json({ error: 'Approval payload is missing message_id.' }, 400);
 
-    const resendKey = Deno.env.get('RESEND_API_KEY');
-    if (!resendKey) return json({ error: 'Email is not configured (RESEND_API_KEY missing).' }, 400);
+    // Connection-first (API manager): the owner's own Resend key carries their sends; the
+    // platform key is the fallback. uid is already the OWNER on both caller paths.
+    const { key: resendKey } = await serviceKey(admin, uid, 'resend', 'RESEND_API_KEY');
+    if (!resendKey) return json({ error: 'Email is not configured — connect Resend in Settings → Connections.' }, 400);
 
     const { data: msg } = await admin.from('outreach_messages')
       .select('id, owner_id, campaign_id, contact_id, batch_id, preview_site_id, subject, body_text, body_html, to_address, status, sent_at')
@@ -108,19 +116,35 @@ Deno.serve(async (req) => {
       return json({ error: 'Message still has an unfilled [YOU FILL]/[EDIT] placeholder — refusing to send.' }, 422);
     }
 
+    // SHORTENER GATE (fail-closed, same posture as the placeholder gate): filters treat shortened
+    // links as cloaked destinations and junk the mail — and one junked send taxes the domain's
+    // reputation for every future send. There is no legitimate shortener in our mail, so this is
+    // the one placement finding that refuses rather than advises.
+    const shortened = findShortenedLinks(composed);
+    if (shortened.length) {
+      return json({ error: `Message links through a URL shortener (${shortened[0]}) — shortened links get email junked. Use the full URL.` }, 422);
+    }
+
     const priorResult = (approval.result as Record<string, unknown> | null) ?? {};
 
     // Atomic claim (double-send guard): stamp send_claimed_at on the approval ONLY where it is
     // still unclaimed — the WHERE is evaluated atomically per row, so two concurrent calls with
     // the same approval cannot both pass; the loser matches zero rows and stops here. block()
     // and the failure path release the claim so a legitimate retry stays possible.
+    // A claim older than an hour is a dead invocation, not an in-flight send — it may be
+    // re-claimed, so a crashed executor never strands the approval forever (deep review #10;
+    // the deploy executors' pattern). Post-success replays stay blocked by the message-level
+    // sent_at check above, which runs before this claim.
+    const staleBefore = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data: claimRows, error: claimErr } = await admin.from('approvals')
       .update({ result: { ...priorResult, send_claimed_at: new Date().toISOString() } })
-      .eq('id', approval_id).eq('status', 'approved').is('result->>send_claimed_at', null)
+      .eq('id', approval_id).eq('status', 'approved')
+      .or(`result->>send_claimed_at.is.null,result->>send_claimed_at.lt.${staleBefore}`)
       .select('id');
     if (claimErr || !claimRows?.length) return json({ error: 'This send is already in flight (or was already claimed).' }, 409);
     const releaseClaim = (extra: Record<string, unknown> = {}) =>
       admin.from('approvals').update({ result: { ...priorResult, ...extra, send_claimed_at: null } }).eq('id', approval_id);
+    releaseOnThrow = () => releaseClaim({ failed: 'executor threw unexpectedly — claim released for retry' });
 
     const ledger = (row: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'resend', action: 'send_email', ...row });
@@ -323,14 +347,22 @@ Deno.serve(async (req) => {
     await ledger({ status: 'ok', request: { to, subject: msg.subject }, response: { resend_id: resendId } });
     // status is already 'approved' (checked at entry) — only the outcome lands in result.
     await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: sentAt, resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
+    releaseOnThrow = null; // the send is durable — a later throw must not release an executed claim
     await admin.from('mind_events').insert({
       owner_id: uid, source: 'execution', event_type: 'email_sent',
       subject: `Sent "${(msg.subject ?? '').slice(0, 120)}" to ${to}`,
       payload: { message_id: messageId, resend_id: resendId, campaign_id: msg.campaign_id },
     }).then(() => {}, () => {});
 
+    // THE PREDICTION PRODUCER (SW7.2) — fire-and-forget AFTER the send is recorded: it opens a
+    // falsifiable decision in the journal (closed later by garvis-consolidate against the real
+    // reply record). A throwing producer must never change a send outcome — the house
+    // .then(()=>{},()=>{}) pattern, pinned by verify:prediction.
+    openSendPrediction(admin, uid, { subject: msg.subject ?? '', to, campaignId: msg.campaign_id ?? null }).then(() => {}, () => {});
+
     return json({ ok: true, resend_id: resendId, sent_at: sentAt });
   } catch (e) {
+    if (releaseOnThrow) await releaseOnThrow().then(() => {}, () => {});
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });

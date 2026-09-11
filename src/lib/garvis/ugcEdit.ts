@@ -22,7 +22,7 @@
 // clearly-provenance-stamped b-roll inserts (the hybrid lane), and phone-source quirks are fixed
 // with transcode, not faked. Deterministic — same inputs, same edit JSON.
 
-import type { FactScript } from './factChannel';
+import type { FactScript } from './factChannel.ts';
 
 export interface UgcTake {
   url: string;          // the uploaded clip's public URL (Shotstack fetches it)

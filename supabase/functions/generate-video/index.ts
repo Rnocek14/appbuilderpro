@@ -8,6 +8,9 @@
 // Secrets: GEMINI_API_KEY (Veo access). Optional: VEO_MODEL, GEMINI_BASE, VEO_COST_PER_SEC.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+// DEEP REVIEW 2026-08 #4: Veo spends real dollars — it joins the credit wall like every other
+// paid seam: gated BEFORE the provider call, recorded when the cost is known.
+import { checkCredits, spendCredits } from '../_shared/credits.ts';
 import {
   SCENE_PROMPTS, buildVeoRequest, veoOperationName, veoResult, sceneUpdateAfterPoll,
   isVideoSceneKind, VEO_MODEL_STANDARD, VEO_MODEL_FAST,
@@ -62,6 +65,12 @@ Deno.serve(async (req) => {
     if (action === 'start') {
       const kind = body.sceneKind ?? '';
       if (!isVideoSceneKind(kind)) return json({ error: `Unknown scene kind "${kind}".` }, 400);
+      // The gate: kill switch, dollar caps, and balance — BEFORE Veo is asked for anything.
+      try { await checkCredits(admin, ownerId, 'video_clip'); }
+      catch (e) {
+        if ((e as { status?: number }).status === 402) return json({ error: e instanceof Error ? e.message : 'Out of credits.' }, 402);
+        throw e;
+      }
       const prompt = (body.prompt && body.prompt.trim()) || SCENE_PROMPTS[kind].prompt;
       const model = body.fast ? (Deno.env.get('VEO_MODEL_FAST') ?? VEO_MODEL_FAST) : (Deno.env.get('VEO_MODEL') ?? VEO_MODEL_STANDARD);
       const reqBody = buildVeoRequest(prompt, { negativePrompt: SCENE_PROMPTS[kind].negative, aspectRatio: '16:9' });
@@ -123,6 +132,9 @@ Deno.serve(async (req) => {
       if (up.error) return json({ error: `Storage upload failed: ${up.error.message}` }, 500);
       const videoUrl = admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl as string;
       const costUsd = DURATION * Number(Deno.env.get('VEO_COST_PER_SEC') ?? '0.75');
+      // Record the real spend where the cost is known — the caps are computed from recorded
+      // spend, so an unrecorded clip is invisible to them (spendCredits is fail-soft by design).
+      await spendCredits(admin, ownerId, { costUsd, kind: 'video_clip', provider: 'gemini', model: 'veo' });
 
       await admin.from('scroll_scenes').update({
         status: 'ready', video_url: videoUrl, cost_usd: costUsd, updated_at: new Date().toISOString(),

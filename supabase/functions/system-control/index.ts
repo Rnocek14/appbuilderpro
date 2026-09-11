@@ -14,6 +14,7 @@
 // Deploy: supabase functions deploy system-control
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { serviceKey } from '../_shared/connections.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 
@@ -68,8 +69,9 @@ Deno.serve(async (req) => {
     // PROBE the Google Places key with a real (tiny) call — presence booleans can't tell a VALID key
     // from an invalid/over-quota one, which fails every hunt while the readiness light reads green.
     if (action === 'probe_places') {
-      const key = Deno.env.get('GOOGLE_PLACES_API_KEY');
-      if (!key) return json({ ok: false, reason: 'GOOGLE_PLACES_API_KEY is not set — add it in Supabase secrets.' });
+      // Connection-first (API manager): probe the key the hunts will actually use for THIS owner.
+      const { key } = await serviceKey(admin, user.id, 'google_places', 'GOOGLE_PLACES_API_KEY');
+      if (!key) return json({ ok: false, reason: 'Google Places is not connected — connect it in Settings → Connections.' });
       try {
         const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
           method: 'POST',

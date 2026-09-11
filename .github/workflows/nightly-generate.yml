@@ -1,0 +1,63 @@
+# Nightly real-output probe (SW9.3): generate a REAL app through the SAME shared driver the
+# product uses, build it, and drive it in Chromium — every night, and on demand. NEVER a
+# required push check: this burns a real API key and real minutes, and its job is to catch
+# generation-quality drift, not to gate merges. Failure files (or updates) one tracking issue.
+#
+# Setup: secret ANTHROPIC_API_KEY; repo variable HEADLESS_MODEL (the model id is configuration,
+# never hardcoded — house rule).
+name: Nightly Generate
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      fixture:
+        description: 'ok (real run) or sabotage (harness self-test — MUST fail the probe)'
+        default: 'ok'
+
+concurrency:
+  group: nightly-generate
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  generate-and-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate through the shared driver
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HEADLESS_MODEL: ${{ vars.HEADLESS_MODEL }}
+        run: npx tsx scripts/headless-generate.mjs --out /tmp/forge-out --fixture "${{ github.event.inputs.fixture || 'ok' }}" 2>&1 | tee headless-generate.log
+      - name: Build and drive it in Chromium
+        run: npx tsx scripts/generated-app-probe.mjs /tmp/forge-out 2>&1 | tee -a headless-generate.log
+      - name: Upload the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: headless-generate-log
+          path: headless-generate.log
+      - name: File or update the tracking issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Nightly generate failed"
+          BODY="The nightly real-output probe failed on run ${{ github.run_id }} (fixture: ${{ github.event.inputs.fixture || 'ok' }}). Log artifact: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          EXISTING=$(gh issue list --repo "${{ github.repository }}" --state open --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "${{ github.repository }}" --body "$BODY"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body "$BODY"
+          fi

@@ -60,6 +60,8 @@ export interface MailerSpec {
   };
   accent: string;                  // brand primary or the house ember
   meta: { sizeIn: [number, number]; bleedIn: number; safeIn: number; addressZoneIn: [number, number] };
+  /** The client's brand (stamped from their brand kit at drop staging; hash-bound with the spec). */
+  brand?: import('./lobCore').LobBrand | null;
 }
 
 const EDIT = (what: string) => `[EDIT: ${what}]`;

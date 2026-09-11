@@ -24,6 +24,9 @@ export interface FarmRecipient {
   isAbsentee: boolean;              // mail present AND genuinely different from situs
   householdKey: string;             // normalized situs — the dedupe + do-not-mail key
   attrs: Record<string, string>;    // every other source column, kept (close date, sale price…)
+  /** USPS deliverability from the verification rail (SW10.2). Absent/undefined = unverified —
+   *  fresh CSV parses have never been checked, and that is not the same as verified. */
+  verifyStatus?: 'unverified' | 'verified' | 'undeliverable';
 }
 
 export interface FarmParseResult {
@@ -228,13 +231,16 @@ export function farmCsv(mailable: FarmRecipient[]): string {
   return ['full_name,address1,city,state,zip,absentee_owner', ...rows].join('\n');
 }
 
-/** Fail-closed merge gate: on the do-not-mail list → suppressed; can't compose a complete
- *  USPS address block → suppressed with the reason. Nothing prints on a guess. */
+/** Fail-closed merge gate: on the do-not-mail list → suppressed; verification says the address
+ *  cannot receive mail (a Lob lookup, or a piece that came back returned-to-sender) → suppressed;
+ *  can't compose a complete USPS address block → suppressed with the reason. Nothing prints on a
+ *  guess — but unverified stays mailable: absence of a lookup is not evidence against an address. */
 export function partitionMailable(recipients: FarmRecipient[], doNotMailKeys: ReadonlySet<string>): MergePartition {
   const mailable: FarmRecipient[] = [];
   const suppressed: { recipient: FarmRecipient; reason: string }[] = [];
   for (const r of recipients) {
     if (doNotMailKeys.has(r.householdKey)) { suppressed.push({ recipient: r, reason: 'do-not-mail' }); continue; }
+    if (r.verifyStatus === 'undeliverable') { suppressed.push({ recipient: r, reason: 'undeliverable (USPS verification or a returned piece)' }); continue; }
     if (!addressBlockLines(r)) { suppressed.push({ recipient: r, reason: 'incomplete address (needs street, city, state, ZIP)' }); continue; }
     mailable.push(r);
   }

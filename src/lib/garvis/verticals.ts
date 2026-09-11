@@ -15,7 +15,7 @@
 // TCPA baseline after the one-to-one consent rule was vacated (Jan 2025) — marketing
 // texts/robocalls still require prior express written consent.
 
-import type { Archetype, Flavor } from './workweb';
+import type { Archetype, Flavor } from './workweb.ts';
 
 export interface SeedArtifact { slug: string; kind: 'doc' | 'research' | 'post'; title: string; detail: string }
 

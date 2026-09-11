@@ -5,7 +5,7 @@
 // generation, is where autonomous systems fail — so the Verifier is first-class and code-enforced,
 // like applyStrategicGuard. Orchestration (the chained model calls + persistence) lives in useMarketing.
 
-import type { MarketingAssetKind } from '../../types';
+import type { MarketingAssetKind } from '../../types/index.ts';
 
 export interface VerifyResult { ok: boolean; issues: string[]; warnings: string[] }
 

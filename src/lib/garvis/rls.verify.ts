@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const migDir = join(here, '../../../supabase/migrations');
 
-const files = readdirSync(migDir).filter((f) => /^app_00\d+.*\.sql$/.test(f)).sort();
+const files = readdirSync(migDir).filter((f) => /^app_0\d+.*\.sql$/.test(f)).sort();
 const sql = files.map((f) => readFileSync(join(migDir, f), 'utf8')).join('\n\n');
 const lower = sql.toLowerCase();
 // Whitespace-normalized copy: migrations align statements with runs of spaces, so substring checks

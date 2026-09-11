@@ -35,8 +35,11 @@ export interface ChannelFact {
   verdict: 'working' | 'silent' | 'too-early' | 'not-instrumented';
 }
 
-const MIN_SAMPLE = 10;       // below this, no rates and no verdicts — arithmetic, not statistics
-const ACT_RESPONSES = 3;     // 'act' confidence needs at least this many real responses
+/** Below this, no rates and no verdicts — arithmetic, not statistics. Exported so the
+ *  cross-venture engine (crossVenture.ts) inherits the SAME sample discipline, never its own. */
+export const MIN_SAMPLE = 10;
+/** 'act' confidence needs at least this many real responses. Shared for the same reason. */
+export const ACT_RESPONSES = 3;
 
 const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
 const usd = (n: number) => `$${n % 1 === 0 ? n.toFixed(0) : n.toFixed(2)}`;

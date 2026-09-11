@@ -11,8 +11,10 @@ export interface InvoiceRow extends InvoiceLike {
   id: string; world_id: string | null; contact_id: string | null; created_at: string;
   // Provenance (app_0086): where the money came from — so revenue teaches, not just totals.
   source: string; lead_id: string | null; campaign_id: string | null; client_subscription_id: string | null;
+  /** How it was PAID (app_0146): 'stripe' = the webhook reconciled it; null = your own hand. */
+  paid_via: string | null;
 }
-const COLS = 'id, world_id, contact_id, number, title, to_email, line_items, amount_usd, due_date, payment_url, status, last_chase_stage, sent_at, paid_at, created_at, source, lead_id, campaign_id, client_subscription_id';
+const COLS = 'id, world_id, contact_id, number, title, to_email, line_items, amount_usd, due_date, payment_url, status, last_chase_stage, sent_at, paid_at, created_at, source, lead_id, campaign_id, client_subscription_id, paid_via';
 
 /** world: undefined = every business (the old behavior); a world id = that business only;
  *  'none' = invoices never assigned to a business. The scan's B8: with several ventures + client
@@ -122,6 +124,19 @@ export async function queueInvoiceSend(invoice: InvoiceRow): Promise<void> {
   const { error: stampErr } = await supabase.from('invoices')
     .update({ status: 'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', invoice.id);
   if (stampErr) throw new Error(`Queued for approval, but the invoice could not be marked sent (${stampErr.message}) — do NOT queue it again; check Approvals.`);
+}
+
+/** Mint a Stripe Payment Link for an invoice (SW7.1) — the link lands in payment_url (the same
+ *  field the hand-paste fallback fills) and its metadata carries the invoice id, so the webhook
+ *  marks the invoice paid the moment the client pays. Unconfigured Stripe returns available:false
+ *  with the setup step named — never a fake link. */
+export async function createPaymentLink(invoiceId: string): Promise<{ url: string | null; available: boolean; error: string | null }> {
+  const { data, error } = await supabase.functions.invoke('invoice-payment-link', { body: { invoice_id: invoiceId } });
+  if (error) throw new Error(error.message);
+  const r = data as { ok?: boolean; available?: boolean; url?: string; error?: string };
+  if (r.available === false) return { url: null, available: false, error: r.error ?? 'Stripe isn\'t connected.' };
+  if (!r.ok || !r.url) throw new Error(r.error ?? 'The payment link could not be created.');
+  return { url: r.url, available: true, error: null };
 }
 
 /** Reject any still-pending send/chase approvals for an invoice. Called when the invoice is paid or

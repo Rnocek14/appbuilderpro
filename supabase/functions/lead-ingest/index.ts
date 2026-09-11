@@ -18,6 +18,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch } from '../_shared/safeFetch.ts';
+import { serviceKey } from '../_shared/connections.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 import {
   scoreLead, pickLeadContact, whyNow, ingestLine, sourceStatusLine, parseLeadEngineConfig,
@@ -111,9 +112,11 @@ async function readPublishedEmail(websiteUri: string): Promise<string | null> {
 async function appendContacts(
   // deno-lint-ignore no-explicit-any
   admin: any,
+  ownerId: string,
   leads: { id: string; score: number; contact_phone: string | null; contact_email: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[],
 ): Promise<number> {
-  const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+  // Connection-first (API manager): the owner's own Places key, platform fallback.
+  const { key: apiKey } = await serviceKey(admin, ownerId, 'google_places', 'GOOGLE_PLACES_API_KEY');
   if (!apiKey) return 0;
   // THE GATE WAS BACKWARDS FOR EMAIL. This filtered on `!contact_phone`, so any lead whose permit
   // already published a phone was skipped entirely — and Austin publishes the contractor's phone on
@@ -559,7 +562,7 @@ Deno.serve(async (req) => {
   }
 
   // Wave-1 contact append — best-effort, bounded, score-gated; never affects the ingest result.
-  const appended = await appendContacts(admin, newLeadRecords).catch(() => 0);
+  const appended = await appendContacts(admin, owner, newLeadRecords).catch(() => 0);
 
   // WEEKLY AUTO-DIGEST (worker path only — the clock composes, the owner approves): each active
   // customer due their digest gets one PENDING approval, trade-filtered, composed by the pure

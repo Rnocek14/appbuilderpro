@@ -16,7 +16,7 @@ Expected, and asserted in CI:
 
 ## Why fixtures at all
 
-`generate-app` plans, writes files, validates and self-heals — and never runs what it made.
+the generator plans, writes files, validates and self-heals — and never runs what it made.
 `validateProject` reads source and infers. The harness adds the half that runs it: build with Vite,
 serve the output, drive it in a real browser with the same prober used on the prototypes.
 

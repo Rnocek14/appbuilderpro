@@ -17,9 +17,17 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { twilioCreds } from '../_shared/connections.ts';
 import { notifyText } from '../_shared/notify.ts';
+import { observe, pickToSay, type ProactiveFacts } from '../../../src/lib/garvis/proactive.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { parseIcsEvents, calendarLine } from '../_shared/icsCore.ts';
+// SW8.2 — the overnight read: one metered call connecting the brief's facts, additive and
+// optional (pure core + acceptance gate verified by overnightRead.verify.ts).
+import { READ_SYSTEM, READ_MIN_FACTS, buildReadUser, acceptOvernightRead } from '../../../src/lib/garvis/overnightRead.ts';
+import { complete, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, getUserPlan } from '../_shared/credits.ts';
+import { quarantineExternal } from '../_shared/untrustedText.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -163,6 +171,42 @@ Deno.serve(async (req) => {
         `Open Garvis → Command to act on all of it.`,
       ].filter(Boolean) as string[];
 
+      // THE OVERNIGHT READ (SW8.2): one metered call connecting the facts above — additive and
+      // optional by construction. The quiet-night gate already passed (real activity exists);
+      // the deterministic lines are the spine either way. Failure of ANY kind (no credits, model
+      // down, rejected read) degrades to the brief as-is — never a blocked morning.
+      let readLine: string | null = null;
+      const factLines = lines.slice(1, -1);            // the real facts, minus header/footer
+      if (factLines.length >= READ_MIN_FACTS) {
+        try {
+          await checkCredits(admin, p.id, 'garvis');
+          const [{ data: blf }, { data: wi }] = await Promise.all([
+            admin.from('mind_beliefs').select('statement').eq('owner_id', p.id).eq('status', 'active').limit(5),
+            admin.from('world_intelligence').select('open_questions').eq('owner_id', p.id).limit(3),
+          ]);
+          const beliefs = ((blf ?? []) as { statement: string }[]).map((b) => b.statement.slice(0, 160));
+          const openQs = ((wi ?? []) as { open_questions?: string[] | null }[])
+            .flatMap((w) => w.open_questions ?? []).slice(0, 5).map((q) => String(q).slice(0, 160));
+          const m = modelForPlan(await getUserPlan(admin, p.id));
+          // Fact lines can carry EXTERNAL text (reply subjects, arc reasons) — quarantined.
+          const res = await complete([
+            { role: 'system', content: READ_SYSTEM },
+            { role: 'user', content: quarantineExternal(buildReadUser(factLines, beliefs, openQs), 6_000).text },
+          ], { provider: m.provider, model: m.model, maxTokens: 300 });
+          await spendCredits(admin, p.id, { costUsd: res.costUsd, kind: 'garvis', provider: m.provider, model: m.model, inputTokens: res.inputTokens, outputTokens: res.outputTokens });
+          const verdict = acceptOvernightRead(res.text, factLines);
+          if (verdict.ok) {
+            readLine = verdict.read;
+            await admin.from('mind_events').insert({
+              owner_id: p.id, event_type: 'note', source: 'overnight-read',
+              subject: readLine.slice(0, 300),
+              payload: { key: `overnight-read:${today}`, date: today },
+            }).then(() => {}, () => {});
+          }
+        } catch { /* out of credits / model down → the deterministic brief stands alone */ }
+      }
+      if (readLine) lines.splice(1, 0, `» ${readLine}`);
+
       await notifyText(p.webhook_url, lines.join('\n'));
       await admin.from('mind_events').insert({
         owner_id: p.id, event_type: 'note', source: 'pulse',
@@ -173,5 +217,71 @@ Deno.serve(async (req) => {
     } catch { /* one owner's failure never blocks the rest */ }
   }
 
-  return json({ ok: true, checked, sent });
+  // ---- GARVIS TEXTS FIRST (SW5.2) --------------------------------------------------------
+  // The proactive rules are the dock's, verbatim (proactive.ts: real rows only, ranked, once
+  // ever) — with the SERVER ledger (app_0145, channel 'sms') as the once-ever cursor and a
+  // claim-by-insert so a line can never send twice. One text per waking hour at most: a text
+  // is dearer than a dock line. Only VERIFIED numbers with proactive_enabled, only waking
+  // hours in the owner's own timezone, and STOP compliance rides Twilio + the Line's own
+  // opt-out (unbind). Nothing here acts outward — a text SAYS; the app still does.
+  let texted = 0;
+  try {
+    // Connection-first (API manager): each owner texts on THEIR OWN Twilio rail when connected,
+    // the platform rail as fallback — resolved per owner inside the loop, after the cheap gates.
+    {
+      const { data: linesData } = await admin.from('garvis_line')
+        .select('owner_id, phone_e164').eq('proactive_enabled', true).not('verified_at', 'is', null).limit(500);
+      for (const line of (linesData ?? []) as { owner_id: string; phone_e164: string }[]) {
+        try {
+          const owner = line.owner_id;
+          const { data: os2 } = await admin.from('outreach_settings').select('timezone').eq('owner_id', owner).maybeSingle();
+          const tz2 = (os2 as { timezone?: string } | null)?.timezone ?? 'America/Chicago';
+          const { hour: localHour } = localParts(now, tz2);
+          if (localHour < 8 || localHour >= 21) continue;                    // waking hours only
+
+          const creds = await twilioCreds(admin, owner);
+          if (!creds?.from) continue;                                        // no texting rail for this owner
+
+          const probe = async <T,>(run: () => PromiseLike<{ data: unknown; error: unknown }>): Promise<T | null> => {
+            try { const { data, error } = await run(); return error ? null : ((data ?? []) as T); } catch { return null; }
+          };
+          const facts: ProactiveFacts = {
+            now: now.toISOString(),
+            approvals: await probe(() => admin.from('approvals').select('id, title, created_at').eq('owner_id', owner).eq('status', 'pending').order('created_at', { ascending: true }).limit(20)),
+            waiting: await probe<{ id: string; title: string; reason: string | null }[]>(() => admin.from('orchestrator_plans').select('id, title, waiting_reason').eq('owner_id', owner).eq('status', 'waiting').order('last_activity_at', { ascending: false }).limit(10))
+              .then((rows) => rows ? (rows as unknown as { id: string; title: string; waiting_reason: string | null }[]).map((r) => ({ id: r.id, title: r.title, reason: r.waiting_reason })) : null),
+            finished: await probe<{ id: string; title: string; last_activity_at: string }[]>(() => admin.from('orchestrator_plans').select('id, title, last_activity_at').eq('owner_id', owner).eq('status', 'done').order('last_activity_at', { ascending: false }).limit(10))
+              .then((rows) => rows ? rows.map((r) => ({ id: r.id, title: r.title, at: r.last_activity_at })) : null),
+            watches: await probe<{ id: string; label: string; last_result: { status?: string; line?: string; excerpt?: string | null } | null; last_run_at: string | null }[]>(() => admin.from('standing_orders').select('id, label, last_result, last_run_at').eq('owner_id', owner).eq('status', 'active').limit(20))
+              .then((rows) => rows ? rows.map((r) => ({ id: r.id, label: r.label, status: String(r.last_result?.status ?? ''), line: String(r.last_result?.line ?? ''), excerpt: r.last_result?.excerpt ?? null, at: r.last_run_at })) : null),
+            opportunities: await probe(() => admin.from('opportunities').select('id, title, found_at').eq('owner_id', owner).eq('status', 'new').order('found_at', { ascending: false }).limit(10)),
+          };
+
+          const { data: spokenRows } = await admin.from('proactive_spoken')
+            .select('key').eq('owner_id', owner).eq('channel', 'sms')
+            .order('said_at', { ascending: false }).limit(400);
+          const spoken = ((spokenRows ?? []) as { key: string }[]).map((r) => r.key);
+          const [say] = pickToSay(observe(facts), spoken, 1);
+          if (!say) continue;                                               // silence is a valid report
+
+          const { data: claimed } = await admin.from('proactive_spoken')
+            .upsert({ owner_id: owner, key: say.key, channel: 'sms' },
+              { onConflict: 'owner_id,key,channel', ignoreDuplicates: true }).select('id');
+          if (!(claimed ?? []).length) continue;                            // another tick beat us to it
+
+          const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${creds.sid}/Messages.json`, {
+            method: 'POST',
+            headers: { Authorization: `Basic ${btoa(`${creds.sid}:${creds.token}`)}`, 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ To: line.phone_e164, From: creds.from, Body: say.text.slice(0, 1000) }),
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!res.ok) continue;                                            // ledger row stands; no retry storm
+          await admin.from('command_messages').insert({ owner_id: owner, role: 'garvis', text: say.text, channel: 'sms' }).then(() => {}, () => {});
+          texted++;
+        } catch { /* one owner's failure never blocks the rest */ }
+      }
+    }
+  } catch { /* proactive texting must never fail the brief */ }
+
+  return json({ ok: true, checked, sent, texted });
 });

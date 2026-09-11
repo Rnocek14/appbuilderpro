@@ -7,7 +7,7 @@
 
 import {
   nextRunAfter, isDue, normalizeContent, contentHash, changeExcerpt, decideWatch,
-  watchArtifact, orderStatusLine,
+  watchArtifact, orderStatusLine, breakerTrips, ORDER_BREAKER_LIMIT,
 } from '../../../supabase/functions/_shared/standingCore';
 
 let passed = 0, failed = 0;
@@ -118,6 +118,14 @@ console.log('standing.verify');
   check('the line reports kept, discarded, email, and mode honestly',
     line.includes('4 pieces staged') && line.includes('incl. 1 email') && line.includes('2 below the bar') && line.includes('waiting for your approval'));
   check('auto mode says so', contentWeekLine('W', 1, 0, false, true).includes('auto-approved'));
+}
+
+// ---- order breaker (app_0140) ----
+{
+  check('below the limit never trips', !breakerTrips(0) && !breakerTrips(ORDER_BREAKER_LIMIT - 1));
+  check('exactly the limit trips', breakerTrips(ORDER_BREAKER_LIMIT));
+  check('beyond the limit stays tripped', breakerTrips(ORDER_BREAKER_LIMIT + 3));
+  check('the limit matches the trigger breaker (one notion of too-many)', ORDER_BREAKER_LIMIT === 5);
 }
 
 console.log(`\nstanding.verify: ${passed} passed, ${failed} failed`);

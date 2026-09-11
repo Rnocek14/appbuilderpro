@@ -8,11 +8,11 @@
 // frameworks/heuristics, and wherever real DATA belongs (prices, comps, rates) the framework
 // says "fill this from a Market Intelligence scan / your records" — it never invents a number.
 
-import type { Archetype, Flavor } from './workweb';
-import { H, NOTE, verticalOverlay, type SeedArtifact, type Vertical } from './verticals';
+import type { Archetype, Flavor } from './workweb.ts';
+import { H, NOTE, verticalOverlay, type SeedArtifact, type Vertical } from './verticals.ts';
 
-export type { SeedArtifact, Vertical } from './verticals';
-export { detectVertical } from './verticals';
+export type { SeedArtifact, Vertical } from './verticals.ts';
+export { detectVertical } from './verticals.ts';
 
 // ---------------------------------------------------------------------------
 // Studio packs

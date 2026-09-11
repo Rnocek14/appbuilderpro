@@ -3,7 +3,7 @@
 // agent can do in each mode — `toolsFor(mode)` is re-applied every step by the runtime, so the
 // model structurally cannot write to the portfolio until it is in `act` mode.
 
-import type { GarvisMode, GarvisTool } from './types';
+import type { GarvisMode, GarvisTool } from './types.ts';
 
 export const GARVIS_TOOLS: GarvisTool[] = [
   {

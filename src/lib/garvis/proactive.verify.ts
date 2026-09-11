@@ -169,5 +169,18 @@ const facts = (over: Partial<ProactiveFacts> = {}): ProactiveFacts => ({
     !/\bI sent\b|\bI published\b|\bI emailed\b|\bwent out\b/i.test(every));
 }
 
+// ---- the SMS channel rides the SAME rules (SW5.2) — textual proof on the pulse ----
+{
+  const { readFileSync } = await import('node:fs');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const pulse = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../supabase/functions/garvis-pulse/index.ts'), 'utf8');
+  check('the pulse texts through observe/pickToSay, never its own ranking', pulse.includes('pickToSay(observe(facts)'));
+  check('one text per waking at most (texts are dearer than dock lines)', pulse.includes('pickToSay(observe(facts), spoken, 1)'));
+  check('the server ledger claims by insert before any send', pulse.indexOf("onConflict: 'owner_id,key,channel', ignoreDuplicates: true") < pulse.indexOf('api.twilio.com/2010-04-01'));
+  check('only verified, opted-in lines are texted', pulse.includes("eq('proactive_enabled', true).not('verified_at', 'is', null)"));
+  check('the sent line lands in the one record, channel-stamped', pulse.includes("role: 'garvis', text: say.text, channel: 'sms'"));
+}
+
 console.log(`\nproactive.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} proactive check(s) failed`);

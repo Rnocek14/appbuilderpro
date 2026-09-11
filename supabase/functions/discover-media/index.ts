@@ -7,6 +7,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { serviceKey } from '../_shared/connections.ts';
 import { PLACES_FIELD_MASK } from '../../../src/lib/garvis/placesDiscovery.ts';
 
 // Flat cost estimates per call (these providers don't return token cost); keeps metering honest-ish.
@@ -81,7 +82,8 @@ Deno.serve(async (req) => {
       // Google Places Text Search (New) — the SAME backend the daily standing-worker hunt uses, so
       // manual "find clients" and the automated hunt now discover businesses identically (structured
       // leads with real websites, not organic-result snippets).
-      const key = Deno.env.get('GOOGLE_PLACES_API_KEY');
+      // Connection-first (API manager): the caller's own Places key, platform fallback.
+      const { key } = await serviceKey(admin, user.id, 'google_places', 'GOOGLE_PLACES_API_KEY');
       if (!key) return json({ available: false });
       // PAGINATE. PLACES_FIELD_MASK has always ASKED for nextPageToken and nothing ever followed it,
       // so one search returned one page and a hunt over a small town came back with five businesses

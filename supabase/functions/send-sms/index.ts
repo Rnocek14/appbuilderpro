@@ -13,6 +13,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
+import { twilioCreds } from '../_shared/connections.ts';
 import { toE164, validSmsBody, smsConsentOk, resolveSmsFrom, type SmsConsent } from '../../../src/lib/garvis/sms.ts';
 
 Deno.serve(async (req) => {
@@ -21,6 +22,8 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
+  // Deep review 2026-08 #10: an unexpected throw after claiming must RELEASE the claim.
+  let releaseOnThrow: (() => PromiseLike<unknown>) | null = null;
   try {
     const { approval_id } = (await req.json().catch(() => ({}))) as { approval_id?: string };
     if (!approval_id) return json({ error: 'approval_id is required.' }, 400);
@@ -57,14 +60,17 @@ Deno.serve(async (req) => {
     if (!messageId) return json({ error: 'Approval payload is missing message_id.' }, 400);
     const smsKind = payload.sms_kind === 'transactional' ? 'transactional' : 'marketing';   // default to the stricter gate
 
-    const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const authToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+    // Connection-first (API manager): the owner's own Twilio account carries their texts; the
+    // platform account is the fallback.
+    const creds = await twilioCreds(admin, uid);
+    const accountSid = creds?.sid;
+    const authToken = creds?.token;
     // PER-CLIENT ROUTING: the enqueuer stamps payload.from_number with the client's own number when
     // they've connected one, so the text comes from THEIR line (recognizable to their customer). We
-    // still fall back to the operator's shared TWILIO_FROM_NUMBER. Both sit on the one Twilio account,
-    // so accountSid/authToken stay global. Refuse only when neither sender is usable.
-    const fromNumber = resolveSmsFrom(payload.from_number, Deno.env.get('TWILIO_FROM_NUMBER'));
-    if (!accountSid || !authToken) return json({ error: 'SMS is not configured (Twilio secrets missing).' }, 400);
+    // still fall back to the owner's connected number, then the platform TWILIO_FROM_NUMBER.
+    // Refuse only when neither sender is usable.
+    const fromNumber = resolveSmsFrom(payload.from_number, creds?.from ?? undefined);
+    if (!accountSid || !authToken) return json({ error: 'SMS is not configured — connect Twilio in Settings → Connections.' }, 400);
     if (!fromNumber) return json({ error: 'No SMS sender number configured (client or default).' }, 400);
 
     const { data: msg } = await admin.from('outreach_messages')
@@ -78,10 +84,12 @@ Deno.serve(async (req) => {
     // Atomic double-send claim (same pattern as send-email).
     const { data: claimRows, error: claimErr } = await admin.from('approvals')
       .update({ result: { ...priorResult, send_claimed_at: new Date().toISOString() } })
-      .eq('id', approval_id).eq('status', 'approved').is('result->>send_claimed_at', null).select('id');
+      .eq('id', approval_id).eq('status', 'approved')
+      .or(`result->>send_claimed_at.is.null,result->>send_claimed_at.lt.${new Date(Date.now() - 60 * 60 * 1000).toISOString()}`).select('id');
     if (claimErr || !claimRows?.length) return json({ error: 'This send is already in flight.' }, 409);
     const releaseClaim = (extra: Record<string, unknown> = {}) =>
       admin.from('approvals').update({ result: { ...priorResult, ...extra, send_claimed_at: null } }).eq('id', approval_id);
+    releaseOnThrow = () => releaseClaim({ failed: 'executor threw unexpectedly — claim released for retry' });
     const ledger = (row: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'twilio', action: 'send_sms', ...row });
     const block = async (reason: string): Promise<Response> => {
@@ -130,10 +138,12 @@ Deno.serve(async (req) => {
     }
 
     await admin.from('outreach_messages').update({ status: 'sent', sent_at: new Date().toISOString(), provider_message_id: data.sid }).eq('id', messageId);
+    releaseOnThrow = null; // durable success — a later throw must not release an executed claim
     await ledger({ status: 'ok', request: { message_id: messageId }, result: { sid: data.sid } });
     await releaseClaim({ sent_sid: data.sid, sent_at: new Date().toISOString() });
     return json({ ok: true, sid: data.sid });
   } catch (e) {
+    if (releaseOnThrow) await releaseOnThrow().then(() => {}, () => {});
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
