@@ -22,7 +22,7 @@ export interface TierTerms {
 
 const TERMS: Record<TierId, TierTerms> = {
   website: { id: 'website', name: tierName('website'), cadence: 'one_time', linkField: 'website_payment_link', defaultCents: 150000 },
-  website_automation: { id: 'website_automation', name: tierName('website_automation'), cadence: 'monthly', linkField: 'automation_payment_link', defaultCents: 50000 },
+  website_automation: { id: 'website_automation', name: tierName('website_automation'), cadence: 'monthly', linkField: 'automation_payment_link', defaultCents: 29900 },
 };
 
 function tierName(id: TierId): string {

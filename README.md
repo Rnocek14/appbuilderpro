@@ -55,7 +55,7 @@ Or paste `supabase/schema.sql` into the SQL editor in the dashboard.
 ### 4. Deploy the edge functions (production mode)
 Model keys live in edge function secrets and never reach the browser.
 ```bash
-supabase secrets set AI_PROVIDER=anthropic AI_MODEL=claude-sonnet-4-6 ANTHROPIC_API_KEY=sk-ant-...
+supabase secrets set AI_PROVIDER=anthropic AI_MODEL=claude-sonnet-5 ANTHROPIC_API_KEY=sk-ant-...
 supabase functions deploy generate-app chat-edit job-worker
 ```
 Swap the secrets for `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `LOCAL_AI_BASE_URL`
@@ -76,7 +76,7 @@ For hacking without deploying functions, set in `.env`:
 ```
 VITE_AI_DIRECT=true
 VITE_AI_PROVIDER=anthropic
-VITE_AI_MODEL=claude-sonnet-4-6
+VITE_AI_MODEL=claude-sonnet-5
 VITE_AI_API_KEY=sk-ant-...
 ```
 The browser then calls the provider directly and writes files itself.

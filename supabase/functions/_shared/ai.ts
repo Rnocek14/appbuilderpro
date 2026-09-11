@@ -33,8 +33,10 @@ export interface AIResult {
 const PRICING: Record<string, { in: number; out: number }> = {
   'claude-fable-5': { in: 10, out: 50 },
   'claude-opus-4-8': { in: 5, out: 25 },
+  'claude-sonnet-5': { in: 2, out: 10 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
-  'claude-haiku-4-5-20251001': { in: 0.8, out: 4 },
+  'claude-haiku-4-5-20251001': { in: 1, out: 5 },
+  'claude-haiku-4-5': { in: 1, out: 5 },
   'gpt-4o': { in: 2.5, out: 10 },
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
 };
@@ -46,7 +48,9 @@ export function estimateCost(model: string, inTok: number, outTok: number): numb
 
 export function getProviderConfig() {
   const provider = (Deno.env.get('AI_PROVIDER') ?? 'anthropic') as AIProvider;
-  const model = Deno.env.get('AI_MODEL') ?? 'claude-sonnet-4-6';
+  // House default: the current Sonnet — newer AND cheaper per token than the 4.6 it replaces
+  // (list price checked Sept 2026). AI_MODEL overrides; the deployed project may pin its own.
+  const model = Deno.env.get('AI_MODEL') ?? 'claude-sonnet-5';
   return { provider, model };
 }
 

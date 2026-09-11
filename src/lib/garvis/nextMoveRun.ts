@@ -7,7 +7,7 @@
 
 import { supabase } from '../supabase';
 import {
-  collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
+  collectReplies, collectApprovals, collectPitchSlate, collectStagedFollowups, collectInsights, collectFloor,
   collectNaturalNext, collectFreshDeploys, collectAdoptedStrategies, collectCrossVenture, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn, type TrailRowIn,
 } from './nextMove';
@@ -72,7 +72,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
   // (not this device's stale cache). Fail-soft: a miss leaves the local cache in charge.
   await loadWorkingState().catch(() => null);
   const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ, leadsQ, remindersQ] = await Promise.all([
-    supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
+    supabase.from('approvals').select('id, kind, title, created_at, payload').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
     // 120 matches worldIntelRun.gather — the waking nudge and the world page must count the
     // same record, or the two disagree about whether a reflection is due.
@@ -290,6 +290,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
       world_id: r.campaign_id ? worldByCampaign.get(r.campaign_id as string) ?? null : null,
       has_next_touch: r.campaign_id ? nextTouchByCampaign.get(r.campaign_id as string) ?? false : false,
     }))),
+    ...collectPitchSlate(approvals.map((a) => ({ id: a.id as string, kind: a.kind as string, title: a.title as string, created_at: a.created_at as string, payload: (a as { payload?: Record<string, unknown> | null }).payload ?? null }))),
     ...collectApprovals(approvals.map((a) => ({ id: a.id as string, kind: a.kind as string, title: a.title as string, created_at: a.created_at as string }))),
     ...collectStagedFollowups(stagedRows),
     ...collectInsights(insights.map((i) => ({ id: i.id as string, title: i.title as string, body: i.body as string, score: Number(i.score), created_at: i.created_at as string }))),

@@ -131,6 +131,23 @@ export function collectReplies(rows: ReplyRowIn[]): NextMove[] {
     }));
 }
 
+/** THE SLATE MOVE: when two or more cold pitches wait, the day's first action is one decision —
+ *  "read one, approve the rest" — not N. Ranked as its own move so the waking moment leads with it. */
+export function collectPitchSlate(rows: (ApprovalRowIn & { payload?: Record<string, unknown> | null })[]): NextMove[] {
+  const pitches = rows.filter((r) => r.kind === 'send_email' && r.payload?.kind === 'cold_site_pitch');
+  if (pitches.length < 2) return [];
+  const oldest = pitches.reduce((a, b) => (a.created_at < b.created_at ? a : b));
+  return [{
+    key: 'pitches:slate',
+    kind: 'approval_waiting',
+    title: `${pitches.length} pitches are ready — read one, approve the rest in one go`,
+    why: 'The hunt built these overnight from the same template in your voice. The Queue offers them as one slate; anything flagged is held out for you.',
+    action: { label: 'Open the slate', route: '/garvis/queue' },
+    score: 0,
+    bornAt: oldest.created_at,
+  }];
+}
+
 export function collectApprovals(rows: ApprovalRowIn[]): NextMove[] {
   if (!rows.length) return [];
   // One move for the whole queue — the queue is one decision surface, not N notifications.

@@ -10,7 +10,7 @@
 // the bump counts against the same MAX_FOLLOWUPS budget.
 //
 // Auth: shared secret (pg_cron / an external scheduler calls this; no user JWT). Deploy --no-verify-jwt.
-// Secret: CRON_SECRET (+ OPENAI_API_KEY/LOVABLE_API_KEY for drafting). Trigger via pg_cron + pg_net, or
+// Secret: CRON_SECRET (+ the configured provider key — ANTHROPIC_API_KEY by default — for drafting). Trigger via pg_cron + pg_net, or
 // any scheduler: POST with header x-cron-secret.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -20,6 +20,8 @@ import { hashPayload } from '../_shared/payloadHash.ts';
 import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { complete, modelForPlan } from '../_shared/ai.ts';
+import { getUserPlan } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const MAX_FOLLOWUPS = 2;
@@ -31,53 +33,47 @@ const MAX_FOLLOWUPS = 2;
 const withinWordCap = (body: string, cap: number): boolean =>
   body.trim().split(/\s+/).filter(Boolean).length <= cap;
 
+/** THE ONE PROVIDER SEAM (was two hard-coded gpt-4o-mini/Lovable fetches that silently drafted
+ *  nothing when only ANTHROPIC_API_KEY was set — the follow-up cron ran and skipped every thread).
+ *  The owner's plan-driven model drafts through _shared/ai.ts, cost is charged before the parse
+ *  (a malformed draft still spent the tokens), and every word cap is enforced, not just asked. */
+// deno-lint-ignore no-explicit-any
+async function draftViaSeam(admin: any, ownerId: string, system: string, user: string, cap: number, subject: string): Promise<{ subject: string; body: string } | null> {
+  try {
+    const model = modelForPlan(await getUserPlan(admin, ownerId));
+    const result = await complete(
+      [{ role: 'system', content: system }, { role: 'user', content: user }],
+      { provider: model.provider, model: model.model, maxTokens: 400 },
+    );
+    await spendCredits(admin, ownerId, {
+      costUsd: result.costUsd, kind: 'followup_draft', provider: model.provider, model: model.model,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+    });
+    const parsed = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
+    if (!parsed.subject || !parsed.body) return null;
+    const bodyOut = String(parsed.body).replace(/\\n/g, '\n');
+    if (!withinWordCap(bodyOut, cap)) return null;
+    parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
+    return { subject: String(parsed.subject).slice(0, 200), body: bodyOut };
+  } catch {
+    return null;
+  }
+}
+
 // deno-lint-ignore no-explicit-any
 async function draftFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, n: number, warm = false): Promise<{ subject: string; body: string } | null> {
-  const openai = Deno.env.get('OPENAI_API_KEY');
-  const lovable = Deno.env.get('LOVABLE_API_KEY');
-  if (!openai && !lovable) return null;
-  const url = openai ? 'https://api.openai.com/v1/chat/completions' : 'https://ai.gateway.lovable.dev/v1/chat/completions';
-  const model = openai ? 'gpt-4o-mini' : 'google/gemini-2.5-flash';
   // TWO TONES, because the silence means different things. A cold prospect going quiet is someone
   // who never asked to hear from us; a WARM lead going quiet is someone who filled in the
   // business's own enquiry form and then didn't answer the acknowledgment — chasing them like a
   // cold pitch ("my earlier email about...") reads as a stranger and squanders the warmest contact
   // in the pipeline. Same rails either way: draft only, PENDING approval, reply hard-stops.
   const system = warm
-    ? 'You write a short, friendly check-in to someone who ENQUIRED with this business days ago and has not answered the reply. They reached out first — never sound like a stranger or a salesperson. Under 45 words. Plain text. Offer one easy next step (a time, a quick call, a yes/no). No "just following up"/"checking in". No salutation if the first name is unknown.'
-    : 'You write short follow-ups to a cold email sent days ago. Under 50 words. Plain text. No "just following up"/"checking in". One question. No salutation if the first name is unknown.';
+    ? 'You write a short, friendly check-in to someone who ENQUIRED with this business days ago and has not answered the reply. They reached out first — never sound like a stranger or a salesperson. Under 45 words. Plain text. Offer one easy next step (a time, a quick call, a yes/no). No "just following up"/"checking in". No salutation if the first name is unknown. Return strict JSON {"subject": string, "body": string} and nothing else.'
+    : 'You write short follow-ups to a cold email sent days ago. Under 50 words. Plain text. No "just following up"/"checking in". One question. No salutation if the first name is unknown. Return strict JSON {"subject": string, "body": string} and nothing else.';
   const user = warm
     ? `Write the check-in. They enquired; we answered; they went quiet.\n\nFirst name: ${firstName || '(unknown)'}\nOur reply's subject: ${subject}\nOur reply:\n"""${body}"""\n\nReturn strict JSON {"subject": string, "body": string}. Subject MUST start with "Re: " + the original subject.`
     : `Write follow-up #${n}. ${n === 1 ? 'A short nudge; re-ask the original question a different way; 2-3 sentences.' : 'A one-sentence breakup note; acknowledge silence is fine; one yes/no question; leave the door open.'}\n\nFirst name: ${firstName || '(unknown)'}\nOriginal subject: ${subject}\nOriginal body:\n"""${body}"""\n\nReturn strict JSON {"subject": string, "body": string}. Subject MUST start with "Re: " + the original subject.`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${openai ?? lovable}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], response_format: { type: 'json_object' }, temperature: 0.4 }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    // audit 12 §1.2 (unmetered call sites): this raw fetch bypasses the _shared/ai.ts seam, so the
-    // ledger entry is computed here — gpt-4o-mini list price ($0.15/1M in, $0.60/1M out); the
-    // Lovable gateway doesn't bill our OpenAI key, so its cost is honestly 0 but the tokens are
-    // still recorded. Charged before the JSON parse below — a malformed draft still spent the
-    // tokens. spendCredits never throws, so the draft is never lost to a ledger hiccup.
-    const inTok = data.usage?.prompt_tokens ?? 0;
-    const outTok = data.usage?.completion_tokens ?? 0;
-    await spendCredits(admin, ownerId, {
-      costUsd: openai ? (inTok * 0.15 + outTok * 0.6) / 1_000_000 : 0,
-      kind: 'followup_draft', provider: openai ? 'openai' : 'lovable', model,
-      inputTokens: inTok, outputTokens: outTok,
-    });
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
-    if (!parsed.subject || !parsed.body) return null;
-    const bodyOut = String(parsed.body).replace(/\\n/g, '\n');
-    if (!withinWordCap(bodyOut, warm ? 45 : 50)) return null;
-    parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
-    return { subject: String(parsed.subject).slice(0, 200), body: bodyOut };
-  } catch {
-    return null;
-  }
+  return draftViaSeam(admin, ownerId, system, user, warm ? 45 : 50, subject);
 }
 
 /** The high-signal bump: they opened it several times and never replied — interested but stuck.
@@ -87,39 +83,9 @@ async function draftFollowup(admin: any, ownerId: string, subject: string, body:
  *  approval preview. */
 // deno-lint-ignore no-explicit-any
 async function draftEngagedFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, opens: number): Promise<{ subject: string; body: string } | null> {
-  const openai = Deno.env.get('OPENAI_API_KEY');
-  const lovable = Deno.env.get('LOVABLE_API_KEY');
-  if (!openai && !lovable) return null;
-  const url = openai ? 'https://api.openai.com/v1/chat/completions' : 'https://ai.gateway.lovable.dev/v1/chat/completions';
-  const model = openai ? 'gpt-4o-mini' : 'google/gemini-2.5-flash';
-  const system = 'You write a short follow-up to a cold email the recipient has read several times without replying — they are interested but stuck. Under 45 words. Plain text. NEVER mention opens, reads, or tracking in any form. Low pressure: make replying take ten seconds (offer the one-line version, or a plain yes/no out). No "just following up"/"checking in". No salutation if the first name is unknown.';
+  const system = 'You write a short follow-up to a cold email the recipient has read several times without replying — they are interested but stuck. Under 45 words. Plain text. NEVER mention opens, reads, or tracking in any form. Low pressure: make replying take ten seconds (offer the one-line version, or a plain yes/no out). No "just following up"/"checking in". No salutation if the first name is unknown. Return strict JSON {"subject": string, "body": string} and nothing else.';
   const user = `They opened the email ${opens} times but never replied. Write the nudge that makes answering easy.\n\nFirst name: ${firstName || '(unknown)'}\nOriginal subject: ${subject}\nOriginal body:\n"""${body}"""\n\nReturn strict JSON {"subject": string, "body": string}. Subject MUST start with "Re: " + the original subject.`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${openai ?? lovable}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], response_format: { type: 'json_object' }, temperature: 0.4 }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    // audit 12 §1.2 (unmetered call sites): same record-only ledger write as draftFollowup — raw
-    // fetch bypasses the ai.ts seam, so the cost lands here, before the parse can fail.
-    const inTok = data.usage?.prompt_tokens ?? 0;
-    const outTok = data.usage?.completion_tokens ?? 0;
-    await spendCredits(admin, ownerId, {
-      costUsd: openai ? (inTok * 0.15 + outTok * 0.6) / 1_000_000 : 0,
-      kind: 'followup_draft', provider: openai ? 'openai' : 'lovable', model,
-      inputTokens: inTok, outputTokens: outTok,
-    });
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
-    if (!parsed.subject || !parsed.body) return null;
-    const bodyOut = String(parsed.body).replace(/\\n/g, '\n');
-    if (!withinWordCap(bodyOut, 45)) return null;
-    parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
-    return { subject: String(parsed.subject).slice(0, 200), body: bodyOut };
-  } catch {
-    return null;
-  }
+  return draftViaSeam(admin, ownerId, system, user, 45, subject);
 }
 
 Deno.serve(async (req) => {

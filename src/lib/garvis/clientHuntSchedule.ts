@@ -103,5 +103,5 @@ export function huntSummary(config: HuntConfig): string {
   const where = config.scope.mode === 'topN' ? `the top ${config.scope.n} US markets`
     : config.scope.mode === 'state' ? config.scope.state
     : `the ${config.scope.region}`;
-  return `Every day: run ${config.searchesPerDay} searches across ${where} for ${what}, build up to ${config.demoQuota} demos + pitches, and queue them for your approval. Nothing sends on its own.`;
+  return `Every day: run ${config.searchesPerDay} searches across ${where} for ${what}, build up to ${config.demoQuota} demos + pitches (spread across the day, one at a time), and queue them for your approval. Nothing sends on its own.`;
 }

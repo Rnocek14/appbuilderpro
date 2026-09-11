@@ -30,17 +30,24 @@ export const CLIENT_TIERS: ClientTier[] = [
     ],
   },
   {
+    // THE CARE PLAN — the monthly tier is deliberately the ZERO-TOUCH bundle: everything in it
+    // runs on its own once set up (hosting, missed-call text-back, booking + reminders, the
+    // instant reply to a new enquiry, the daily site watch). The "it drafts — you approve"
+    // automations (review requests, reactivation, invoice chases) are an add-on the client
+    // asks for, because each one puts a decision in front of the operator for every customer
+    // touched. Selling the runs-rung bundle by default is what lets ten clients cost the
+    // operator nothing after onboarding.
     id: 'website_automation',
-    name: 'Website + Automation',
-    blurb: 'The new site, plus recurring automations that bring customers back — on autopilot.',
-    priceHint: 'from $500/mo',
+    name: 'Website + Care Plan',
+    blurb: 'The new site, kept running: hosting, missed-call text-back, online booking, and an instant reply to every enquiry — on autopilot.',
+    priceHint: 'from $299/mo',
     cadence: 'monthly',
     includes: [
-      'Everything in New Website',
-      'Recall / seasonal reminders to your customers',
-      'Review requests after each job',
-      'Lead follow-up + win-back of past customers',
-      'Every message approval-gated — nothing sends without your OK',
+      'Everything in New Website, hosted and watched daily',
+      'Missed-call text-back — a missed call gets a text in seconds',
+      'Online booking page + appointment reminders',
+      'Every website enquiry answered within a minute',
+      'Add-on when you want it: review requests, win-back notes, invoice reminders (each approved by you first)',
     ],
   },
 ];

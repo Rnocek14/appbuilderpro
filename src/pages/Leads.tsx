@@ -102,6 +102,7 @@ export default function Leads() {
     { key: 'all', label: 'All', count: all.length },
     ...STAGE_LADDER.map((s) => ({ key: s as Filter, label: STAGE_META[s].label, count: roll[s], dot: STAGE_META[s].dot, color: STAGE_META[s].color })),
     { key: 'skipped' as Filter, label: 'Skipped', count: roll.skipped, dot: STAGE_META.skipped.dot, color: STAGE_META.skipped.color },
+    { key: 'no_email' as Filter, label: 'No email', count: roll.no_email, dot: STAGE_META.no_email.dot, color: STAGE_META.no_email.color },
   ];
 
   return (

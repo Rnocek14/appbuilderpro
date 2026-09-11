@@ -36,6 +36,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
+import { dayStateFor, planTick, advanceDay, nextHuntRunIso, dayJustFinished, huntDayLine, type HuntDayState, type TickPlan } from '../../../src/lib/garvis/huntTick.ts';
 import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES, DRY_RUNS_BEFORE_ROTATE, QUERY_VARIANTS } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
 import { buildHuntProfileRaw, buildHuntPitch, buildHuntPitchEmailHtml, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
@@ -1375,43 +1376,85 @@ Deno.serve(async (req) => {
     // flows into the watch/digest persist block below. Honesty is the same everywhere: it READS +
     // queues pitches as PENDING approvals; nothing sends.
     if (order.kind === 'client_hunt') {
-      try {
-        const r = await runClientHunt(admin, order, nowIso);
-        ran++;
-        if (r.built > 0) changed++;
-        await admin.from('standing_orders').update({
-          last_run_at: nowIso,
-          last_result: { status: r.built > 0 ? 'changed' : 'unchanged', line: r.line, hash: null, excerpt: null, checkedAt: nowIso },
-          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
-          updated_at: nowIso,
-        }).eq('id', order.id);
-        // Surface a productive day once (deduped by order+date) — the waking moment reads these.
-        if (r.built > 0) {
-          const key = `client-hunt:${order.id}:${nowIso.slice(0, 10)}`;
-          const dayAgo = new Date(Date.parse(nowIso) - 26 * 60 * 60 * 1000).toISOString();
-          const { data: recent } = await admin.from('mind_events')
-            .select('payload').eq('owner_id', order.owner_id).eq('source', 'standing-order')
-            .gte('occurred_at', dayAgo).limit(200);
-          const seen = new Set((recent ?? []).map((x) => String((x as { payload?: { key?: string } }).payload?.key ?? '')));
-          if (!seen.has(key)) {
-            await admin.from('mind_events').insert({
-              owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
-              subject: r.line.slice(0, 300),
-              payload: { key, order_id: order.id, kind: order.kind, discovered: r.discovered, built: r.built, queued: r.queued },
-            });
-            const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
-            await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, r.line).catch(() => {});
-          }
-        }
-      } catch (e) {
+      // TICK-SLICED (huntTick.ts): plan this tick's slice from the day state riding in config, run it,
+      // fold the actuals back, and come due again NEXT tick while budget remains — otherwise sleep to
+      // the cadence boundary. The heavy part (one demo) runs after the response is sent
+      // (EdgeRuntime.waitUntil, the job-worker/lob-send pattern) so the clock's HTTP call returns in
+      // seconds and the build is never cut off by the caller's timeout. next_run_at is stamped BEFORE
+      // the work starts so a slow build is never double-picked by the following tick.
+      const huntCfg = parseHuntConfig(order.config);
+      if (!huntCfg) {
         failed++;
         await admin.from('standing_orders').update({
           last_run_at: nowIso,
-          last_result: { status: 'unreachable', line: `Run failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
-          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
-          updated_at: nowIso,
+          last_result: { status: 'unreachable', line: `${order.label}: no config — nothing to hunt. Set it up on Win Clients.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
         }).eq('id', order.id).then(() => {}, () => {});
+        continue;
       }
+      const before: HuntDayState = dayStateFor((order.config as Record<string, unknown> | null)?.dayState, nowIso);
+      const plan = planTick(huntCfg, before);
+      if (plan.dayDone) {
+        // Quota met (or nothing left to build): sleep until the cadence boundary. No work, no notify.
+        await admin.from('standing_orders').update({
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+        continue;
+      }
+      // Reserve the slot: due again in ~one tick. Overwritten with the real answer when the slice ends.
+      await admin.from('standing_orders').update({
+        next_run_at: new Date(Date.parse(nowIso) + 14 * 60_000).toISOString(), updated_at: nowIso,
+      }).eq('id', order.id).then(() => {}, () => {});
+      ran++;
+      const slice = (async () => {
+        try {
+          const r = await runClientHunt(admin, order, nowIso, plan);
+          const after = advanceDay(before, {
+            searches: r.searches, demos: r.built, checks: r.checks, discovered: r.discovered,
+            queued: r.queued, noEmail: r.noEmail, poolEmpty: r.poolEmpty,
+          });
+          const finished = dayJustFinished(huntCfg, before, after);
+          const doneIso = new Date().toISOString();
+          await admin.from('standing_orders').update({
+            last_run_at: doneIso,
+            last_result: { status: r.built > 0 ? 'changed' : 'unchanged', line: r.line, hash: null, excerpt: null, checkedAt: doneIso },
+            config: { ...(order.config as Record<string, unknown> | null ?? {}), dayState: after },
+            next_run_at: nextHuntRunIso(huntCfg, after, doneIso, nextRunAfter(order.cadence, order.anchor_at, doneIso)),
+            updated_at: doneIso,
+          }).eq('id', order.id);
+          // The day's summary lands ONCE — when the last slice closes the books (deduped by order+date
+          // as a backstop). The waking moment and the morning brief read this event.
+          if (finished || (after.demos >= huntCfg.demoQuota && !before.poolEmpty && r.built > 0)) {
+            const key = `client-hunt:${order.id}:${doneIso.slice(0, 10)}`;
+            const dayAgo = new Date(Date.parse(doneIso) - 26 * 60 * 60 * 1000).toISOString();
+            const { data: recent } = await admin.from('mind_events')
+              .select('payload').eq('owner_id', order.owner_id).eq('source', 'standing-order')
+              .gte('occurred_at', dayAgo).limit(200);
+            const seen = new Set((recent ?? []).map((x) => String((x as { payload?: { key?: string } }).payload?.key ?? '')));
+            if (!seen.has(key)) {
+              const line = huntDayLine(order.label, after, huntCfg);
+              await admin.from('mind_events').insert({
+                owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+                subject: line.slice(0, 300),
+                payload: { key, order_id: order.id, kind: order.kind, discovered: after.discovered, built: after.demos, queued: after.queued, no_email: after.noEmail },
+              });
+              const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
+              await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, line).catch(() => {});
+            }
+          }
+        } catch (e) {
+          const doneIso = new Date().toISOString();
+          await admin.from('standing_orders').update({
+            last_run_at: doneIso,
+            last_result: { status: 'unreachable', line: `Run failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry next tick.`, hash: null, excerpt: null, checkedAt: doneIso },
+            // A failed slice keeps the day's budget (nothing was spent) and tries again next tick.
+            next_run_at: doneIso, updated_at: doneIso,
+          }).eq('id', order.id).then(() => {}, () => {});
+        }
+      })();
+      // deno-lint-ignore no-explicit-any
+      const rt = (globalThis as any).EdgeRuntime as { waitUntil?: (p: Promise<unknown>) => void } | undefined;
+      if (rt?.waitUntil) rt.waitUntil(slice); else await slice;
       continue;
     }
 
@@ -2058,11 +2101,18 @@ async function runDigest(admin: any, order: OrderRow, nowIso: string): Promise<W
 // --- client_hunt: the daily automatic prospecting run (Google Places) ----------------------------
 // Two phases per run, the swift-prep-pros model. DISCOVER: run the next-best non-exhausted Places
 // queries, persisting every REAL business into the lead pool (deduped) and marking a market drained
-// after two zero-insert runs. BUILD: turn up to demoQuota fresh leads into demos + queued pitches,
-// NO-WEBSITE prospects first (they need a site the most). All decisions come from the VERIFIED pure
-// modules; this is only Places + fetch-url + DB. A soft time budget bounds the invocation.
-const HUNT_TIME_BUDGET_MS = 90_000;
-const DISCOVER_BUDGET_MS = 55_000;   // cap discovery so building always gets a share of the window
+// after two zero-insert runs. BUILD: turn fresh leads into demos + queued pitches. All decisions
+// come from the VERIFIED pure modules; this is only Places + fetch-url + DB.
+//
+// TICK-SLICED (huntTick.ts): the day's quota is a BUDGET spent across the 15-minute ticks — a slice
+// of searches and at most ONE demo per tick until the numbers are met. One invocation used to try
+// the whole day inside a 90 s window and built ~1 demo/day whatever the quota said.
+// EMAIL FIRST: the pitch needs an address, so the cheap contact scrape runs BEFORE any model call;
+// a lead with no public email is set aside ('no_email') at zero model cost instead of getting a
+// demo nobody can be emailed about. Leads WITH a website are the only ones that can yield an email,
+// so they are the unattended build order; no-website leads keep their phone for the operator.
+const HUNT_TIME_BUDGET_MS = 110_000;   // one tick's ceiling — one demo build fits comfortably
+const DISCOVER_BUDGET_MS = 40_000;     // the search slice is small (SEARCHES_PER_TICK); leave the window to the build
 const PLACES_PAGES = 2;   // pages per query (≤20 results each) — bounds Places cost per search
 
 interface HuntEnv {
@@ -2206,13 +2256,14 @@ async function runAreaStudy(admin: any, order: OrderRow, nowIso: string):
   return { line, done, audited, failed };
 }
 
-async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
-  Promise<{ discovered: number; built: number; queued: number; line: string }> {
+async function runClientHunt(admin: any, order: OrderRow, nowIso: string, plan: TickPlan):
+  Promise<{ discovered: number; built: number; queued: number; noEmail: number; checks: number; searches: number; poolEmpty: boolean; line: string }> {
+  const zero = { discovered: 0, built: 0, queued: 0, noEmail: 0, checks: 0, searches: 0, poolEmpty: false };
   const cfg = parseHuntConfig(order.config);
-  if (!cfg) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: no config — nothing to hunt. Set it up on Win Clients.` };
+  if (!cfg) return { ...zero, line: `${order.label}: no config — nothing to hunt. Set it up on Win Clients.` };
   // Connection-first (API manager): the hunt discovers on the order owner's own Places key.
   const { key: placesKey } = await connectionKey(admin, order.owner_id, 'google_places', 'GOOGLE_PLACES_API_KEY');
-  if (!placesKey) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: Google Places isn’t connected — nothing was hunted. Connect it in Settings → Connections.` };
+  if (!placesKey) return { ...zero, line: `${order.label}: Google Places isn’t connected — nothing was hunted. Connect it in Settings → Connections.` };
 
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,
@@ -2229,50 +2280,78 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
   // no-op). buildDiscoveryQueries expands the niches (or the whole catalog) × the scope's cities.
   await ensureDiscoveryQueue(admin, order.owner_id, cfg);
 
-  // --- DISCOVER: run up to searchesPerDay next-best queries, persist the real businesses ----------
-  let discovered = 0;
+  // --- DISCOVER: this tick's slice of next-best queries, persist the real businesses ---------------
+  let discovered = 0; let searches = 0;
   let discoveryError: string | null = null;
-  const { data: queries } = await admin.from('discovery_queries')
-    .select('id, query_text, keyword, last_run_at, exhausted, total_inserted, run_count, consecutive_zero_runs')
-    .eq('owner_id', order.owner_id).eq('exhausted', false)
-    .order('last_run_at', { ascending: true, nullsFirst: true })   // never-run first, then least-recent
-    .limit(cfg.searchesPerDay);
-  for (const q of (queries ?? []) as QueryRowDB[]) {
-    if (Date.now() - startedMs > DISCOVER_BUDGET_MS) break;   // leave time for the build phase
-    const r = await runDiscoveryQuery(admin, order.owner_id, q, env);
-    discovered += r.inserted;
-    // A rejected key fails EVERY query — stop hammering Places and surface the reason (below).
-    if (r.apiError) { discoveryError = r.apiError; break; }
+  if (plan.searches > 0) {
+    const { data: queries } = await admin.from('discovery_queries')
+      .select('id, query_text, keyword, last_run_at, exhausted, total_inserted, run_count, consecutive_zero_runs')
+      .eq('owner_id', order.owner_id).eq('exhausted', false)
+      .order('last_run_at', { ascending: true, nullsFirst: true })   // never-run first, then least-recent
+      .limit(plan.searches);
+    for (const q of (queries ?? []) as QueryRowDB[]) {
+      if (Date.now() - startedMs > DISCOVER_BUDGET_MS) break;   // leave time for the build phase
+      const r = await runDiscoveryQuery(admin, order.owner_id, q, env);
+      searches++;
+      discovered += r.inserted;
+      // A rejected key fails EVERY query — stop hammering Places and surface the reason (below).
+      if (r.apiError) { discoveryError = r.apiError; break; }
+    }
   }
 
-  // --- BUILD: up to demoQuota fresh leads → demo + pitch, NO-WEBSITE prospects first --------------
-  let built = 0; let queued = 0;
+  // --- BUILD: this tick's demo slot — email first, then the demo, then the pitch -------------------
+  let built = 0; let queued = 0; let noEmail = 0; let checks = 0; let poolEmpty = false;
   // Stale-claim sweep: a crash mid-build leaves a lead 'building' forever — older than 2h means
   // that run is dead; return it to the queue (mirrors the batch drain's claim discipline).
   await admin.from('discovered_businesses')
     .update({ status: 'new', updated_at: nowIso })
     .eq('owner_id', order.owner_id).eq('status', 'building')
     .lt('updated_at', new Date(Date.now() - 2 * 3600_000).toISOString());
-  const { data: leads } = await admin.from('discovered_businesses')
-    .select('id, place_id, company_name, keyword, website, phone, city, state')
-    .eq('owner_id', order.owner_id).eq('status', 'new')
-    .order('has_website', { ascending: true }).order('created_at', { ascending: true })
-    .limit(cfg.demoQuota);
-  for (const lead of (leads ?? []) as LeadRow[]) {
-    if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
-    // CLAIM FIRST: flip new → building before any expensive work. A crash between the preview
-    // insert and the 'built' update used to re-run the whole chain next day — duplicate demo,
-    // duplicate pitch email to a real business. No claim → someone else has it → skip silently.
-    const { data: claimRows } = await admin.from('discovered_businesses')
-      .update({ status: 'building', updated_at: new Date().toISOString() })
-      .eq('id', lead.id).eq('status', 'new').select('id');
-    if (!claimRows?.length) continue;
-    try {
-      const outcome = await buildDemoForLead(admin, order, lead, env);
-      if (outcome === 'queued') { built++; queued++; }
-      else if (outcome === 'built') built++;
-      else await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: nowIso }).eq('id', lead.id);
-    } catch { /* one lead failing never sinks the day — the stale sweep reclaims it next run */ }
+  if (plan.demos > 0) {
+    // Only a lead WITH a website can yield a public email, so those are the unattended candidates.
+    // (No-website leads are set aside below with their phone intact — a call or a postcard reaches
+    // them; a demo built for an address we don't have is spend with no pitch.)
+    const { data: leads } = await admin.from('discovered_businesses')
+      .select('id, place_id, company_name, keyword, website, phone, city, state')
+      .eq('owner_id', order.owner_id).eq('status', 'new').eq('has_website', true)
+      .order('created_at', { ascending: true })
+      .limit(plan.checks);
+    const candidates = (leads ?? []) as LeadRow[];
+    for (const lead of candidates) {
+      if (built >= plan.demos) break;
+      if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
+      // CLAIM FIRST: flip new → building before any expensive work. A crash between the preview
+      // insert and the 'built' update used to re-run the whole chain next day — duplicate demo,
+      // duplicate pitch email to a real business. No claim → someone else has it → skip silently.
+      const { data: claimRows } = await admin.from('discovered_businesses')
+        .update({ status: 'building', updated_at: new Date().toISOString() })
+        .eq('id', lead.id).eq('status', 'new').select('id');
+      if (!claimRows?.length) continue;
+      checks++;
+      try {
+        const outcome = await buildDemoForLead(admin, order, lead, env, false, true);
+        if (outcome === 'queued') { built++; queued++; }
+        else if (outcome === 'built') built++;
+        else if (outcome === 'no_email') {
+          noEmail++;
+          await admin.from('discovered_businesses').update({ status: 'no_email', updated_at: nowIso }).eq('id', lead.id);
+        }
+        else await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: nowIso }).eq('id', lead.id);
+      } catch { /* one lead failing never sinks the day — the stale sweep reclaims it next run */ }
+    }
+    if (candidates.length === 0) {
+      // Nothing with a website left to work. Set aside a slice of the no-website leads so the pool
+      // reads honestly (their phone stays; the Prospects page lists them under "No email") and
+      // report the pool as empty so the clock stops spending ticks on it until discovery refills.
+      const { data: bare } = await admin.from('discovered_businesses')
+        .select('id').eq('owner_id', order.owner_id).eq('status', 'new').eq('has_website', false).limit(50);
+      const ids = ((bare ?? []) as { id: string }[]).map((b) => b.id);
+      if (ids.length) {
+        await admin.from('discovered_businesses').update({ status: 'no_email', updated_at: nowIso }).in('id', ids);
+        noEmail += ids.length;
+      }
+      poolEmpty = true;
+    }
   }
 
   // A Places API error is the loud, actionable outcome — the operator needs to fix the key, not
@@ -2280,10 +2359,10 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
   // discovery resumes the moment the key works. The build phase still ran on existing leads.
   if (discoveryError) {
     const built_note = built > 0 ? ` Still built ${built} demo${built === 1 ? '' : 's'} from existing leads.` : '';
-    return { discovered, built, queued,
+    return { discovered, built, queued, noEmail, checks, searches, poolEmpty,
       line: `${order.label}: ⚠️ Google Places rejected the request (${discoveryError.slice(0, 120)}) — check GOOGLE_PLACES_API_KEY in Supabase secrets: billing on, Places API (New) enabled, quota, and key API-restrictions.${built_note} No new businesses found; nothing sent on its own.` };
   }
-  return { discovered, built, queued, line: huntRunLine(order.label, discovered, built, queued) };
+  return { discovered, built, queued, noEmail, checks, searches, poolEmpty, line: huntRunLine(order.label, discovered, built, queued) };
 }
 
 /** Seed the discovery queue on the owner's first run (skipped once any rows exist). Chunked upsert,
@@ -2412,11 +2491,21 @@ async function scrapePage(url: string, mode: 'text' | 'images' | 'contact', env:
  *  → pitch → (if a public email exists) a PENDING approval. Mirrors ingest-profile's save path and
  *  queuePitch's queue path. Also marks the lead built + links the demo. */
 // deno-lint-ignore no-explicit-any
-async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env: HuntEnv, autoSend = false):
-  Promise<'queued' | 'built' | 'skipped'> {
+async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env: HuntEnv, autoSend = false, requireEmail = false):
+  Promise<'queued' | 'built' | 'skipped' | 'no_email'> {
   const location = [lead.city, lead.state].filter(Boolean).join(', ') || null;
   let images: string[] = [];
   let email: string | null = null;
+  // EMAIL FIRST (requireEmail — the unattended hunt): the pitch cannot go anywhere without a public
+  // address, so the cheap contact scrape runs before a single model call. No site or no address →
+  // 'no_email' at zero model cost; the caller sets the lead aside with its phone intact. The
+  // operator's on-demand "Build & send" keeps building regardless (they may pitch by phone).
+  if (requireEmail) {
+    if (!lead.website) return 'no_email';
+    const early = await scrapePage(lead.website, 'contact', env);
+    email = Array.isArray(early?.emails) ? ((early!.emails as string[])[0] ?? null) : null;
+    if (!email) return 'no_email';
+  }
   let page: { title: string | null; description: string | null } = { title: null, description: null };
   let finalUrl = lead.website ?? '';
   // Default (no site, or an unreachable one): an honest "no website" audit — no invented score.
@@ -2462,8 +2551,10 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     images = Array.isArray(imgResp?.images)
       ? (imgResp!.images as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u).slice(0, 12)
       : [];
-    const contactResp = await scrapePage(lead.website, 'contact', env);
-    email = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
+    if (!email) {
+      const contactResp = await scrapePage(lead.website, 'contact', env);
+      email = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
+    }
   }
 
   const raw = buildHuntProfileRaw({
@@ -2747,6 +2838,27 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   await admin.from('discovered_businesses')
     .update({ status: 'built', preview_site_id: (site as { id: string }).id, updated_at: new Date().toISOString() })
     .eq('id', lead.id);
+
+  // STASH FOR A ZERO-CLICK SALE: a bespoke demo is a complete HTML document — store it now (images
+  // re-hosted by publish-preview) so that when the prospect pays from the demo, the Stripe webhook
+  // publishes it live with no browser and no Go Live click. Best-effort: a stash failure only means
+  // the sale falls back to the "PAID — click Go Live" ping it always had.
+  const bespokeHtml = (spec as { html?: unknown }).html;
+  if (typeof bespokeHtml === 'string' && looksLikeHtmlDoc(bespokeHtml) && env.workerSecret) {
+    try {
+      const st = await fetch(`${env.supabaseUrl}/functions/v1/publish-preview`, {
+        method: 'POST', signal: AbortSignal.timeout(45_000),
+        headers: {
+          'content-type': 'application/json', 'x-worker-secret': env.workerSecret,
+          authorization: `Bearer ${env.serviceKey}`, apikey: env.serviceKey,
+        },
+        body: JSON.stringify({ previewSiteId: (site as { id: string }).id, html: bespokeHtml, stashOnly: true }),
+      });
+      buildLog.stashed = st.ok;
+      if (!st.ok) buildLog.stash_error = (await st.text().catch(() => '')).slice(0, 160);
+    } catch (e) { buildLog.stashed = false; buildLog.stash_error = String((e as Error)?.message ?? e).slice(0, 160); }
+    await admin.from('preview_sites').update({ build_log: buildLog }).eq('id', (site as { id: string }).id).then(() => {}, () => {});
+  }
 
   // No public email → the demo is a warm asset (plus a real phone lead from Places), but there is
   // nothing to email. Honest: a built demo, not a queued pitch.

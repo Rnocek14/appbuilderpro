@@ -14,7 +14,8 @@ import { supabase } from '../lib/supabase';
 import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness, type DiscoveryEngine } from '../lib/garvis/clientHuntRun';
 import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
-import { huntSummary, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
+import { huntSummary, parseHuntConfig, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
+import { dayStateFor, huntProgressLine } from '../lib/garvis/huntTick';
 import { deriveSignals, proposeFromSignals } from '../lib/garvis/automation/detect';
 import { automationUpsellParagraph } from '../lib/garvis/clientHuntBuild';
 import { detectVertical } from '../lib/garvis/verticals';
@@ -466,6 +467,13 @@ export default function WinClients() {
                     </span>
                   </div>
                   <p className="mt-0.5 line-clamp-2 text-[11.5px] text-forge-dim">{orderStatusLine(hunt)}</p>
+                  {(() => {
+                    // Today's budget, from the day state the ticks write into the order's config.
+                    const cfgNow = parseHuntConfig(hunt.config);
+                    if (!cfgNow) return null;
+                    const ds = dayStateFor((hunt.config as Record<string, unknown> | null)?.dayState, new Date().toISOString());
+                    return <p className="mt-0.5 text-[11px] font-medium text-forge-ink/80">{huntProgressLine(ds, cfgNow)}</p>;
+                  })()}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <Button variant="primary" size="sm" onClick={() => void runHuntNow()} disabled={runningHunt || hunt.status !== 'active'}>

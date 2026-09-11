@@ -6,6 +6,14 @@
 //
 // Deploy WITH JWT OFF (Resend can't send a Supabase JWT): supabase functions deploy resend-webhook --no-verify-jwt
 // Secret: RESEND_WEBHOOK_SECRET (the whsec_… value from the Resend dashboard).
+//
+// INBOUND REPLIES ride the same webhook (Resend "Receiving": one MX record on the sending
+// subdomain, then the `email.received` event). The event carries only metadata — the body is
+// fetched from GET /emails/receiving/{id} with RESEND_API_KEY — and the assembled message is
+// handed to resend-inbound (the one reply-ingestion path: correlation, classification, sequence
+// stop, unsubscribe suppression, forward-in mailbox) over the worker secret. Before this, replies
+// only landed if the operator wired a custom forwarder to resend-inbound's flat JSON shape —
+// i.e. they never landed, and follow-ups kept nagging people who had answered.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -69,6 +77,57 @@ Deno.serve(async (req) => {
   try { event = JSON.parse(body); } catch { return new Response('Invalid JSON', { status: 400, headers: cors }); }
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+  // ---- email.received → the reply-ingestion path -------------------------------------------
+  if (event.type === 'email.received') {
+    const emailId = event.data?.email_id ?? event.data?.id ?? null;
+    const apiKey = Deno.env.get('RESEND_API_KEY');
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    if (!emailId) return new Response(JSON.stringify({ ok: true, note: 'received event without an id; ignored' }), { status: 200, headers: { ...cors, 'content-type': 'application/json' } });
+    // Missing config is a 500 on purpose: Resend retries (5s → 10h), so the reply is not lost while
+    // the operator sets the key — and the failure is visible in Resend's webhook log, not silent.
+    if (!apiKey || !workerSecret) return new Response('RESEND_API_KEY + WORKER_SECRET are required to ingest replies', { status: 500, headers: cors });
+    let mail: {
+      from?: string; to?: string[]; subject?: string; text?: string | null; html?: string | null;
+      headers?: Record<string, string> | null; message_id?: string;
+    };
+    try {
+      const r = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`, {
+        headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(20_000),
+      });
+      if (!r.ok) return new Response(`Resend fetch ${r.status}`, { status: r.status === 404 ? 200 : 502, headers: cors });
+      mail = await r.json();
+    } catch (e) {
+      return new Response(`Resend fetch failed: ${e instanceof Error ? e.message : String(e)}`, { status: 502, headers: cors });
+    }
+    // Plain text first; an HTML-only reply is reduced to its text (tags stripped, entities kept
+    // simple) so classification and quoted-line stripping read the prospect's own words.
+    const text = (mail.text ?? '').trim() || String(mail.html ?? '')
+      .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*\/?>|<\/p>|<\/div>/gi, '\n').replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+    const h = mail.headers ?? {};
+    const hget = (k: string) => h[k] ?? h[k.toLowerCase()] ?? h[k.toUpperCase()] ?? '';
+    const forward = {
+      from: mail.from ?? '', to: mail.to ?? [], subject: mail.subject ?? '', text,
+      in_reply_to: hget('in-reply-to') || undefined, references: hget('references') || undefined,
+      message_id: mail.message_id ?? (hget('message-id') || undefined),
+    };
+    try {
+      const fr = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/resend-inbound`, {
+        method: 'POST', signal: AbortSignal.timeout(30_000),
+        headers: {
+          'content-type': 'application/json', 'x-worker-secret': workerSecret,
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+        },
+        body: JSON.stringify(forward),
+      });
+      const out = await fr.text();
+      return new Response(out || '{"ok":true}', { status: fr.ok ? 200 : 502, headers: { ...cors, 'content-type': 'application/json' } });
+    } catch (e) {
+      return new Response(`inbound hand-off failed: ${e instanceof Error ? e.message : String(e)}`, { status: 502, headers: cors });
+    }
+  }
   const type = TYPE_MAP[event.type ?? ''] ?? null;
   const resendId = event.data?.email_id ?? event.data?.id ?? null;
   const to = (Array.isArray(event.data?.to) ? event.data?.to[0] : event.data?.to) ?? null;

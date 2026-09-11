@@ -1,13 +1,17 @@
 // src/components/garvis/AutonomyPanel.tsx
-// THE TRUST DIAL (app_0097). Four recurring approval classes, each with its real human-decision
-// streak. Auto is OFFERED only after the streak earns it (5 clean approvals), granted only by
-// the operator's click, capped per day, revoked in one click — and revocation is instant because
-// the cron drafters re-read the grant on every mint. Cold pitches have no dial, ever.
+// THE TRUST DIAL (app_0097, widened by app_0160). Five recurring approval classes, each with its
+// real human-decision streak. Auto is OFFERED only after the streak earns it (5 clean approvals;
+// 25 for cold pitches — the one class that emails a stranger first), granted only by the
+// operator's click, capped per day, revoked in one click — and revocation is instant because
+// the drafters re-read the grant on every mint. The cold pitch shows its streak (the slate in
+// the Queue is its one-keypress path) but has no Grant button: nothing self-approves a first
+// email to a stranger.
 
 import { useEffect, useState } from 'react';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { autonomyStatus, setAutonomy, type AutonomyStatus } from '../../lib/garvis/autonomyRun';
+import { GRANTABLE_CLASSES } from '../../lib/garvis/autonomy';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -40,7 +44,7 @@ export function AutonomyPanel({ onToast }: { onToast: Toast }) {
       <div className="flex items-center gap-2">
         <ShieldCheck size={14} className="text-forge-ember" />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-forge-dim">Earned autonomy</h3>
-        <span className="text-[10px] text-forge-dim/70">5 clean approvals earn the offer — you grant it, it stays capped, revoke is instant</span>
+        <span className="text-[10px] text-forge-dim/70">5 clean approvals earn the offer — you grant it, it stays capped, revoke is instant. Cold pitches: the slate, never auto.</span>
       </div>
       <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
         {rows.map((r) => (
@@ -50,9 +54,10 @@ export function AutonomyPanel({ onToast }: { onToast: Toast }) {
               <p className="text-[10px] text-forge-dim">
                 {r.mode === 'auto'
                   ? `AUTO — ${r.autoToday}/${r.dailyCap} today`
-                  : r.eligible ? `earned (${r.streak} clean) — grant when ready` : `${r.streak}/5 clean approvals`}
+                  : r.eligible ? `earned (${r.streak} clean) — grant when ready` : `${r.streak}/${r.needed} clean approvals`}
               </p>
             </div>
+            {GRANTABLE_CLASSES.includes(r.id) ? (
             <button
               onClick={() => void flip(r)}
               disabled={busy === r.id || (r.mode === 'manual' && !r.eligible)}
@@ -63,6 +68,9 @@ export function AutonomyPanel({ onToast }: { onToast: Toast }) {
             >
               {busy === r.id ? <Loader2 size={11} className="animate-spin" /> : r.mode === 'auto' ? 'Revoke' : 'Grant auto'}
             </button>
+            ) : (
+              <span className="rounded-md border border-forge-border px-2 py-1 text-[11px] text-forge-dim" title="First emails to strangers are approved by you — use the slate in the Queue to approve the day's pitches in one go.">slate only</span>
+            )}
           </li>
         ))}
       </ul>

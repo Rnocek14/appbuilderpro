@@ -5,7 +5,7 @@
 // those signals to ONE honest stage + the next action, so the pipeline bar, the row badge, and the
 // drawer all agree. Zero runtime imports — a leaf.
 
-export type ProspectStage = 'new' | 'built' | 'pitched' | 'won' | 'skipped';
+export type ProspectStage = 'new' | 'built' | 'pitched' | 'won' | 'skipped' | 'no_email';
 
 // The pipeline ladder, left→right. 'skipped' is deliberately NOT in the ladder — it's a side state
 // (passed over), surfaced as its own filter, never a rung a prospect "progresses" to.
@@ -24,10 +24,14 @@ export const STAGE_META: Record<ProspectStage, StageMeta> = {
   pitched: { label: 'Pitched', color: 'text-forge-heat',  dot: 'bg-forge-heat',  next: 'Pitched — follow up, or mark it won' },
   won:     { label: 'Won',     color: 'text-forge-ok',    dot: 'bg-forge-ok',    next: 'Won — set up their accounts' },
   skipped: { label: 'Skipped', color: 'text-forge-dim',   dot: 'bg-forge-dim',   next: 'Passed over — reopen to work it again' },
+  // Set aside by the unattended hunt: no public email could be found, so no demo was built (a demo
+  // nobody can be emailed about is spend without a pitch). Still a real business with a phone —
+  // the operator can call, or a postcard channel can reach them. "Build & send" still applies.
+  no_email: { label: 'No email', color: 'text-forge-dim', dot: 'bg-forge-dim', next: 'No public email — call them, or build the demo and pitch by phone' },
 };
 
 export interface StageInputs {
-  status: string;                  // discovered_businesses.status: 'new' | 'built' | 'skipped'
+  status: string;                  // discovered_businesses.status: 'new' | 'built' | 'skipped' | 'no_email'
   previewStatus?: string | null;   // linked preview_sites.status: 'preview' | 'emailed' | 'purchased' | 'published'
   won?: boolean;                   // a client_subscription is linked to this prospect's demo
 }
@@ -40,6 +44,7 @@ export function deriveStage(inp: StageInputs): ProspectStage {
   if (inp.status === 'skipped') return 'skipped';
   if (inp.previewStatus === 'emailed' || inp.previewStatus === 'published') return 'pitched';
   if (inp.status === 'built') return 'built';
+  if (inp.status === 'no_email') return 'no_email';
   return 'new';
 }
 
@@ -51,7 +56,7 @@ export function nextAction(stage: ProspectStage): string {
 /** Count prospects per stage (every stage present, even at 0, so the pipeline never hides an empty rung).
  *  Skipped is counted too — the UI shows it as a separate chip. */
 export function stageRollup(stages: ProspectStage[]): Record<ProspectStage, number> {
-  const counts: Record<ProspectStage, number> = { new: 0, built: 0, pitched: 0, won: 0, skipped: 0 };
+  const counts: Record<ProspectStage, number> = { new: 0, built: 0, pitched: 0, won: 0, skipped: 0, no_email: 0 };
   for (const s of stages) counts[s]++;
   return counts;
 }
@@ -59,7 +64,7 @@ export function stageRollup(stages: ProspectStage[]): Record<ProspectStage, numb
 /** Whether a prospect at this stage can still be built/pitched with one click (New or Built), i.e. the
  *  "Build & send" action still applies. Pitched/Won/Skipped no longer show it as the primary action. */
 export function canBuildAndSend(stage: ProspectStage): boolean {
-  return stage === 'new' || stage === 'built';
+  return stage === 'new' || stage === 'built' || stage === 'no_email';
 }
 
 // ── post-send engagement signals ────────────────────────────────────────────

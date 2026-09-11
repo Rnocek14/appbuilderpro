@@ -9,6 +9,7 @@
 // optional for classification; without a key it stores the reply unclassified and still stops the sequence).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { cronAuthorized } from '../_shared/cronGate.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { spendCredits } from '../_shared/credits.ts';
 
@@ -80,7 +81,10 @@ Deno.serve(async (req) => {
     for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
     return diff === 0;
   };
-  if (!secret || !provided || !constantTimeEqual(provided, secret)) return json({ error: 'Unauthorized' }, 401);
+  // Two callers: a custom forwarder with INBOUND_SECRET, or resend-webhook handing over a Resend
+  // "Receiving" email on the worker secret (cronGate) — so replies need no extra secret to land.
+  const byInboundSecret = !!secret && !!provided && constantTimeEqual(provided, secret);
+  if (!byInboundSecret && !cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
 
   const payload = (await req.json().catch(() => ({}))) as {
     from?: string; to?: string | string[]; subject?: string; text?: string; body?: string;

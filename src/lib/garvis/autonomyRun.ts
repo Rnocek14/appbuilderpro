@@ -4,13 +4,14 @@
 // and revoking are the operator's explicit clicks, audited by the table itself.
 
 import { supabase } from '../supabase';
-import { classifyApproval, computeStreak, eligibleForAuto, AUTONOMY_CLASSES, type AutonomyClass } from './autonomy';
+import { classifyApproval, computeStreak, eligibleForAuto, minStreakFor, defaultDailyCap, AUTONOMY_CLASSES, type AutonomyClass } from './autonomy';
 
 export interface AutonomyStatus {
   id: AutonomyClass;
   title: string;
   what: string;
   streak: number;
+  needed: number;      // clean approvals the offer needs for THIS class (cold pitches: 25)
   eligible: boolean;
   mode: 'manual' | 'auto';
   dailyCap: number;
@@ -43,8 +44,8 @@ export async function autonomyStatus(): Promise<AutonomyStatus[]> {
     const autoToday = classRows.filter((r) =>
       r.decided_via === 'autonomy_grant' && r.decided_at && r.decided_at >= dayStart.toISOString()).length;
     return {
-      id: c.id, title: c.title, what: c.what, streak, eligible: eligibleForAuto(streak),
-      mode: g?.mode ?? 'manual', dailyCap: g?.daily_cap ?? 5, autoToday,
+      id: c.id, title: c.title, what: c.what, streak, needed: minStreakFor(c.id), eligible: eligibleForAuto(streak, c.id),
+      mode: g?.mode ?? 'manual', dailyCap: g?.daily_cap ?? defaultDailyCap(c.id), autoToday,
     };
   });
 }

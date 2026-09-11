@@ -86,7 +86,10 @@ const queue = readFileSync(join(root, 'src/pages/Queue.tsx'), 'utf8');
     worker.includes(".eq('status', 'pending').is('risk_score', null)") && worker.includes('the Queue renders without it'));
   check('the Queue chip shows only at HIGH with the reasons named — no other render path exists',
     queue.includes('a.risk_score >= RISK_HIGH') && queue.includes('review closely')
-    && [...queue.matchAll(/a\.risk_score/g)].length === 2);
+    && [...queue.matchAll(/a\.risk_score >= RISK_HIGH/g)].length === 1
+    // the typeof guard + the chip + the slate feed (slate.ts holds a HIGH-scored pitch OUT of the
+    // one-keypress slate — a read, never a second render path)
+    && [...queue.matchAll(/a\.risk_score/g)].length === 3 && queue.includes('riskScore: a.risk_score'));
 }
 
 console.log(`\napprovalRisk.verify: ${passed} passed, ${failed} failed`);

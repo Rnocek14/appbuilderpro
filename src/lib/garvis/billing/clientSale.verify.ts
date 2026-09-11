@@ -17,7 +17,7 @@ console.log('clientSale.verify');
   const w = tierTerms('website');
   check('website is one-time via the website link', w.cadence === 'one_time' && w.linkField === 'website_payment_link' && w.defaultCents === 150000);
   const a = tierTerms('website_automation');
-  check('automation is monthly via the automation link', a.cadence === 'monthly' && a.linkField === 'automation_payment_link' && a.defaultCents === 50000);
+  check('care plan is monthly via the automation link, priced as the zero-touch bundle', a.cadence === 'monthly' && a.linkField === 'automation_payment_link' && a.defaultCents === 29900);
   check('names come from the shared tier catalog', w.name.length > 0 && a.name.length > 0);
 }
 

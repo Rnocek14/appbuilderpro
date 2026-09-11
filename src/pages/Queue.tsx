@@ -28,6 +28,7 @@ import {
 } from '../lib/garvis/execution';
 import { expiryCountdown } from '../lib/garvis/approvalTtl';
 import { RISK_HIGH } from '../lib/garvis/approvalRisk';
+import { buildSlate, slateOffered, slateLine, slateResultLine } from '../lib/garvis/slate';
 import {
   loadInbox, composeReply, markLeadAnswered, markReplyHandled, unmarkReplyHandled, reopenLead,
   markMailHandled, unmarkMailHandled, draftContext, type InboxItem,
@@ -124,6 +125,30 @@ export default function Queue() {
     ...pendingQuestions.map((q): Row => ({ key: `q-${q.id}`, lane: 'question', q })),
     ...(items ?? []).map((m): Row => ({ key: `m-${m.kind}-${m.id}`, lane: 'message', m })),
   ], [approvals, runInbox.questions, pendingQuestions, items]);
+
+  // THE SLATE (slate.ts): the day's cold pitches as ONE decision. Read one card (they share a
+  // template and your voice), then approve the rest in one keypress. Flagged pitches are held out.
+  const slate = useMemo(() => buildSlate((approvals ?? []).map((a) => ({
+    id: a.id, kind: a.kind, status: a.status, payload: a.payload, riskScore: a.risk_score ?? null,
+  })), RISK_HIGH), [approvals]);
+  const [slateBusy, setSlateBusy] = useState<{ done: number; total: number } | null>(null);
+  const approveSlate = async () => {
+    if (slateBusy || !slateOffered(slate)) return;
+    const members = (approvals ?? []).filter((a) => slate.ids.includes(a.id));
+    setSlateBusy({ done: 0, total: members.length });
+    let ok = 0, failed = 0;
+    for (const a of members) {
+      try {
+        const res = await approveAndExecute(a);
+        if (res.ok) { ok++; setApprovals((prev) => (prev ?? []).filter((x) => x.id !== a.id)); }
+        else failed++;
+      } catch { failed++; }
+      setSlateBusy({ done: ok + failed, total: members.length });
+    }
+    setSlateBusy(null);
+    toast(failed === 0 ? 'success' : ok === 0 ? 'error' : 'info', slateResultLine(ok, failed));
+    void refresh();
+  };
 
   useEffect(() => { setSel((s) => Math.min(s, Math.max(0, rows.length - 1))); }, [rows.length]);
   useEffect(() => {
@@ -247,6 +272,7 @@ export default function Queue() {
       if (e.key === 'j') { e.preventDefault(); setSel((s) => Math.min(s + 1, rows.length - 1)); }
       else if (e.key === 'k') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
       else if (!row) return;
+      else if (e.key === 'A' && slateOffered(slate)) { e.preventDefault(); void approveSlate(); }
       else if (e.key === 'a' && row.lane === 'decision') { e.preventDefault(); if (!actingId) void decide(row.a, true); }
       else if (e.key === 'x' && row.lane === 'decision') { e.preventDefault(); if (!actingId) void decide(row.a, false); }
       else if (e.key === 'r' && row.lane === 'message') { e.preventDefault(); openReply(row.m); }
@@ -260,7 +286,7 @@ export default function Queue() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sel, tab, approvals, items, actingId]);
+  }, [rows, sel, tab, approvals, items, actingId, slate, slateBusy]);
 
   const loading = approvals === null || items === null || runInbox.loading;
   const selKey = rows[sel]?.key;
@@ -373,6 +399,18 @@ export default function Queue() {
         ) : (
           <>
             {(approvals ?? []).length > 0 && laneHead('Decisions — the only irreversible clicks')}
+            {slateOffered(slate) && (
+              <div className="mb-3 flex flex-col gap-2 rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-forge-ink">Today's pitches</p>
+                  <p className="text-xs text-forge-dim">{slateLine(slate)}</p>
+                </div>
+                <Button variant="primary" size="sm" onClick={() => void approveSlate()} disabled={!!slateBusy || !!actingId}
+                  title="Shift+A — approves and sends every cold pitch in the slate through the normal send gates">
+                  {slateBusy ? <><Loader2 size={13} className="animate-spin" /> {slateBusy.done}/{slateBusy.total}</> : <><Send size={13} /> Approve all {slate.ids.length}</>}
+                </Button>
+              </div>
+            )}
             <ul className="space-y-2">
               {(approvals ?? []).map((a) => (
                 <li key={`d-${a.id}`} ref={(el) => { if (el) rowRefs.current.set(`d-${a.id}`, el); }}

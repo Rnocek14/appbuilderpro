@@ -73,8 +73,8 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   try {
-    const { previewSiteId, html, customDomain } = (await req.json().catch(() => ({}))) as
-      { previewSiteId?: string; html?: string; customDomain?: string };
+    const { previewSiteId, html, customDomain, stashOnly } = (await req.json().catch(() => ({}))) as
+      { previewSiteId?: string; html?: string; customDomain?: string; stashOnly?: boolean };
     if (!previewSiteId) return json({ error: 'previewSiteId is required.' }, 400);
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -96,10 +96,24 @@ Deno.serve(async (req) => {
       if (user.id !== ownerId) return json({ error: 'Preview not found.' }, 404);
     }
 
+    const htmlPath = publishedHtmlPath(ownerId, previewSiteId);
+
+    // STASH ONLY (worker path, at demo-build time): the hunt's bespoke demo is already a complete
+    // HTML document, so the worker stores it here — images re-hosted — WITHOUT deploying. A later
+    // paid sale then auto-publishes from this stash with no browser and no Go Live click. Hosting
+    // is not required to stash (Netlify is only touched when a site actually goes live).
+    if (stashOnly === true) {
+      if (!byWorker) return json({ error: 'stashOnly is a worker-only operation.' }, 403);
+      if (typeof html !== 'string' || html.trim().length < 200) return json({ error: 'stashOnly needs the rendered html.' }, 400);
+      const durable = await rehostImages(admin, html, ownerId, previewSiteId);
+      const bytes = new TextEncoder().encode(durable) as Uint8Array<ArrayBuffer>;
+      const up = await admin.storage.from('project-assets').upload(htmlPath, bytes, { contentType: 'text/html; charset=utf-8', upsert: true });
+      if (up.error) return json({ error: `stash failed: ${up.error.message}` }, 502);
+      return json({ ok: true, stashed: true, path: htmlPath });
+    }
+
     const token = Deno.env.get('NETLIFY_AUTH_TOKEN');
     if (!token) return json({ error: 'Hosting is not connected — set NETLIFY_AUTH_TOKEN (a Netlify personal access token).' }, 400);
-
-    const htmlPath = publishedHtmlPath(ownerId, previewSiteId);
 
     // Resolve the HTML: the operator sends it (and we stash it); the worker re-publishes the stash.
     // Uint8Array<ArrayBuffer> (concrete backing) so it satisfies BufferSource/BodyInit under Deno.

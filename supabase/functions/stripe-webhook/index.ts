@@ -182,16 +182,48 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
     } catch { /* watch is best-effort; the operator can arm one from Automations */ }
   }
 
+  // CARE-PLAN SELF-ONBOARDING: a monthly sale used to activate the row and stop — the package
+  // pin, the watch, and the operator's onboarding steps only happened on the manual close-won
+  // path. Now the webhook pins the current package version itself (server-side twin of
+  // pinAndEstablish; idempotent — the unique pin index arbitrates a redelivery) and books ONE
+  // reminder naming the two things only a human can do: the number for missed-call text-back,
+  // and the customer list. Fail-soft: the sale stands even if the pin or reminder hiccups.
+  let onboarding: string | null = null;
+  if (sub.tier === 'website_automation') {
+    try {
+      const { data: pkgRows } = await admin.from('service_packages')
+        .select('id, owner_id, version, status').eq('key', 'website_automation').eq('status', 'current')
+        .or(`owner_id.eq.${ownerId},owner_id.is.null`)
+        .order('owner_id', { ascending: false, nullsFirst: false }).order('version', { ascending: false }).limit(1);
+      const pkg = (pkgRows ?? [])[0] as { id: string } | undefined;
+      if (pkg) {
+        await admin.from('package_pins').insert({ owner_id: ownerId, client_subscription_id: sub.id, package_id: pkg.id })
+          .then(() => {}, () => {});   // duplicate on redelivery → the unique index keeps the first pin
+      }
+      const due = new Date(Date.now() + 24 * 3_600_000).toISOString();
+      const title = `Onboard ${sub.business_name}: 20-minute call — their number for missed-call text-back, and their customer list`;
+      const { data: dup } = await admin.from('reminders').select('id').eq('owner_id', ownerId).eq('title', title).limit(1);
+      if (!dup?.length) {
+        await admin.from('reminders').insert({
+          owner_id: ownerId, title, due_at: due,
+          detail: 'Care plan paid. Everything else runs on its own: hosting, the daily site watch, booking, and the instant reply to enquiries. Set up their Twilio number on Missed-call, and import their customer list on Automations if they want review requests or win-back notes (each of those is approved by you).',
+          world_id: (sub as { world_id?: string | null }).world_id ?? null,
+        });
+      }
+      onboarding = 'Care plan: onboarding call booked as a reminder (their number + customer list).';
+    } catch { /* fail-soft: the sale is recorded; the operator sees SOLD and can onboard by hand */ }
+  }
+
   // Tell the operator, in-app + webhook. This is a raised hand that paid — never let it land silently.
   await admin.from('mind_events').insert({
     owner_id: ownerId, source: 'execution', event_type: 'note',
     subject: `💰 SOLD — ${sub.business_name} bought ${sub.tier} (${outcome})`,
-    payload: { kind: 'client_sale_paid', client_subscription_id: sub.id, preview_site_id: previewId, live_url: liveUrl },
+    payload: { kind: 'client_sale_paid', client_subscription_id: sub.id, preview_site_id: previewId, live_url: liveUrl, onboarding },
   }).then(() => {}, () => {});
   const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).maybeSingle();
   await notifyText(
     (owner as { webhook_url?: string } | null)?.webhook_url,
-    `💰 SOLD — ${sub.business_name}\nPlan: ${sub.tier}\n${liveUrl ? `Live: ${liveUrl}` : outcome}`,
+    `💰 SOLD — ${sub.business_name}\nPlan: ${sub.tier}\n${liveUrl ? `Live: ${liveUrl}` : outcome}${onboarding ? `\n${onboarding}` : ''}`,
   );
   return true;
 }

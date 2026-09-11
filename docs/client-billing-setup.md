@@ -8,12 +8,12 @@ FableForge's own `/billing` (which charges *you* for Pro). No code or keys neede
 | Offer | Cadence | Suggested price |
 |---|---|---|
 | **New Website** | one-time | from $1,500 |
-| **Website + Automation** | monthly | from $500/mo |
+| **Website + Care Plan** | monthly | from $299/mo |
 
 ## Step 1 — create two Payment Links in Stripe (5 min)
 1. Stripe dashboard → **Product catalog → Payment links → + New**.
 2. **New Website**: add a product "New Website", price it (one-time), create the link.
-3. **Website + Automation**: add a product "Website + Automation", price it **recurring / monthly**, create the link.
+3. **Website + Care Plan**: add a product "Website + Care Plan", price it **recurring / monthly**, create the link.
 4. Copy each link (they look like `https://buy.stripe.com/…`).
 
 > Tip: on each Payment Link, turn on "Collect customer email" so you know who paid.
@@ -36,7 +36,7 @@ So **Go Live** and auto-publish can host sites:
 
 ## How a sale flows now (hands-off)
 1. You pitch the demo (the email shows a real screenshot). The prospect opens it.
-2. On the demo they tap **Make it mine** → **$500/mo** (site + automation) or **$1,500 once**.
+2. On the demo they tap **Make it mine** → **$299/mo** (site + care plan) or **$1,500 once**.
 3. That sends them straight to your Stripe Payment Link (email prefilled) and records a **pending** sale in **Client billing**.
 4. They pay → the webhook flips the sale **active**, updates your **MRR**, and **publishes the site live** (if you'd already hit **Go Live** on it, it's live instantly; otherwise you get a "PAID — click Go Live" ping). You get a `💰 SOLD` notification.
 
@@ -47,4 +47,4 @@ On **Preview engine**, each demo row has **Go Live**: your browser renders the f
 
 ## Fulfilment after a sale
 - **New Website**: it's already hosted (Go Live / auto-publish). Point their domain when they're ready (Custom domain is supported on publish; they add a DNS record or you do it for them).
-- **Website + Automation**: import their customer list in **Automations**, turn on the sector automations, and approve the sends.
+- **Website + Care Plan**: the webhook pins the package and books you ONE reminder: a 20-minute call for their phone number (missed-call text-back on **Missed-call**) and, only if they want review requests or win-back notes, their customer list on **Automations** (those sends are approved by you). Hosting, the daily site watch, booking, and the instant reply to enquiries run on their own.
