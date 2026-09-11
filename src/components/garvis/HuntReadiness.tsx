@@ -15,6 +15,7 @@ const GATE_LABEL: Record<ReadinessNeed, string> = {
   hunt: 'Find businesses + build pitchable demos',
   send: 'Email a pitch (through the approval gate)',
   auto: 'Run the daily hunt automatically',
+  sell: 'Get paid + go live with no click',
 };
 
 export function HuntReadiness() {
@@ -42,8 +43,9 @@ export function HuntReadiness() {
     { need: 'hunt', ok: r.canHunt },
     { need: 'send', ok: r.canSend },
     { need: 'auto', ok: r.canAutoHunt },
+    { need: 'sell', ok: r.canSell },
   ];
-  const allGood = r.canHunt && r.canSend && r.canAutoHunt;
+  const allGood = r.canHunt && r.canSend && r.canAutoHunt && r.canSell;
 
   return (
     <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
@@ -58,7 +60,7 @@ export function HuntReadiness() {
       <p className="mt-1 text-xs text-forge-dim">{readinessLine(r)}</p>
 
       {/* The three gates, each with its color */}
-      <div className="mt-2 grid gap-1.5 sm:grid-cols-3">
+      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
         {gates.map((g) => (
           <div key={g.need} className={cn('flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px]',
             g.ok ? 'border-forge-ok/30 text-forge-ok' : 'border-forge-ember/30 text-forge-ember')}>

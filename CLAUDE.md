@@ -19,9 +19,19 @@ regress the product even when each added control is individually justified:
    step. "Type something and hit search to see anything" is a defect.
 
 Reference implementations: Home (the waking moment — actions first), Queue (one decision at a
-time, keyboard pass), Prospects (one button fills the pipeline), the growth world page
-(chip-strip preamble → studio), Fact Channel Studio (pulse → Draft → episodes; "Channel setup"
-disclosure).
+time, keyboard pass; the day's cold pitches as ONE slate, Shift+A), Prospects (one button fills
+the pipeline), the growth world page (chip-strip preamble → studio), Fact Channel Studio (pulse →
+Draft → episodes; "Channel setup" disclosure).
+
+## The money path (Sept 2026) — what the operator actually runs
+
+`docs/revenue-focus-plan.md` is the standing answer to "what is the business": the local-business
+funnel (hunt → bespoke demo → cold pitch → Stripe link → auto-publish), sold as a $1,500 site and a
+$299/mo zero-touch care plan. `docs/daily-run.md` is the operator's ten-minute protocol. Rules that
+protect it: the hunt is tick-sliced (`huntTick.ts`) and checks for a public email BEFORE any model
+spend; a bespoke demo's HTML is stashed at build time so a payment publishes with no click; replies
+arrive through `resend-webhook` (`email.received`); a first email to a stranger is never
+self-approved by the server — the slate is its one-keypress path.
 
 ## House patterns (established across the build)
 

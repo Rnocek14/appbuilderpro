@@ -15,7 +15,7 @@ design — RLS is the security boundary).
 |---|-------|-------------|-------|
 | 1 | Supabase → Settings → API | Variables: `VITE_SUPABASE_URL` = `https://aobrsurgymnyxifoqfpu.supabase.co`, `VITE_SUPABASE_ANON_KEY` = the anon key | 2 min |
 | 2 | console.anthropic.com | Secret: `ANTHROPIC_API_KEY` | The brain — nothing thinks without it. Expect $5–50/mo early |
-| 3 | resend.com | Secrets: `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` | Add a SENDING domain (see below), verify DNS. Webhook endpoint: `https://aobrsurgymnyxifoqfpu.supabase.co/functions/v1/resend-webhook`. Free to 3k emails/mo |
+| 3 | resend.com | Secrets: `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` | Add a SENDING domain (see below), verify DNS. Webhook endpoint: `https://aobrsurgymnyxifoqfpu.supabase.co/functions/v1/resend-webhook` — subscribe it to the delivery events AND `email.received`. Then domain → **Receiving** → add the one MX record: replies come back through that same webhook. Free to 3k emails/mo (received mail counts) |
 | 4 | netlify.com | Secrets: `NETLIFY_AUTH_TOKEN` (User settings → Applications), `NETLIFY_APP_SITE_ID` (create one empty site → Site details → API ID) | Hosts the console AND client sites. Free tier fine |
 | 5 | console.cloud.google.com | Secret: `GOOGLE_PLACES_API_KEY` (enable Places API) | Powers prospect hunting. $200/mo free credit covers early volume |
 | 6 | stripe.com | Secrets: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (endpoint: `…/functions/v1/stripe-webhook`) | Getting paid. Price-ID secrets are for SaaS tiers later — skip for now |
@@ -50,12 +50,16 @@ Then run two workflows (Actions tab):
   their site — everything through your Queue.
 - **The agency-of-one motion, daily**: hunter finds local businesses with broken web presence →
   real demo site → pitch through the Queue. Target: 5 pitches/day, 25/week.
-- **Pricing to open with**: $500/mo digital (site + drips + content + attribution receipts) ·
+- **Pricing to open with**: $1,500 for the site (one click to fulfil — the demo's HTML is stashed and publishes itself when they pay) · $299/mo **Website + Care Plan** (hosting, missed-call text-back, booking, instant enquiry reply, daily site watch — all runs-rung, zero approvals after a 20-minute onboarding call) · drafts-rung automations (review requests, win-back, invoice chases) as a +$250/mo add-on ·
   $1,000–1,500/mo with the postcard farm (mail hard-costs bundled at the top price). Anchor
   against what they already pay: one bad Zillow month costs more and attributes nothing.
 - **The weekly review**: every Friday, the measured-channel table against Act I's gates
   (docs/path-to-one-billion.md — ≥10 clients / $10k MRR / one act-grade channel). Evidence, not
   vibes, decides what scales.
+
+## Phase 4 — The daily run
+
+Ten minutes a day, one screen: `docs/daily-run.md`. The waking moment leads with the slate; the Queue approves the day's pitches in one keypress; sales publish and onboard themselves; the hunt spends its quota across the day one demo at a time.
 
 ## Standing cautions
 

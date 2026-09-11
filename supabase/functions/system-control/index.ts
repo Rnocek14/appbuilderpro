@@ -45,6 +45,7 @@ const SECRETS: { name: string; pillar: string; unlocks: string }[] = [
   { name: 'NETLIFY_AUTH_TOKEN', pillar: 'ship', unlocks: 'One-click site deploys (deploy-site)' },
   { name: 'SB_MANAGEMENT_TOKEN', pillar: 'ship', unlocks: 'Database provisioning + backend deploys (provision-supabase, deploy-backend)' },
   { name: 'STRIPE_SECRET_KEY', pillar: 'money', unlocks: 'Checkout + billing (create-checkout, stripe-webhook)' },
+  { name: 'STRIPE_WEBHOOK_SECRET', pillar: 'money', unlocks: 'A client payment records itself and publishes the site with no click (stripe-webhook)' },
 ];
 
 Deno.serve(async (req) => {

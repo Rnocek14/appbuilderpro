@@ -76,7 +76,7 @@ chase, and reactivation goes through this one path.
 - [ ] Setup → outreach settings → `physical_address` — **CAN-SPAM requires it**; `send-email` refuses without it.
 - [ ] Flip `outbound_enabled` **ON** (the email kill switch, off by default).
 - [ ] `RESEND_WEBHOOK_SECRET` — bounce/open/click tracking (point the Resend webhook at `resend-webhook`).
-- [ ] `INBOUND_SECRET` — reply ingestion (so replies auto-classify + stop the sequence).
+- [ ] **Replies**: in Resend, open your sending domain → turn on **Receiving** → add the one MX record it shows (on the sending subdomain, so it never conflicts with your real mailbox). Replies then arrive through the same `resend-webhook` (the `email.received` event), get classified, stop the sequence, and honour opt-outs. No extra secret. (`INBOUND_SECRET` is only for a custom forwarder.)
 - [ ] **Selling "instantly acknowledged" leads?** Flip `auto_first_touch` ON (Settings) — it's the
       standing rule that answers a website enquiry within a minute. Off, leads still capture and
       alert you; nothing acknowledges them automatically.

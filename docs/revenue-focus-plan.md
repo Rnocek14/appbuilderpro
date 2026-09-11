@@ -9,6 +9,29 @@ strategy docs' own verdicts. This document replaces every other "what is the bus
 
 ---
 
+## Status — what was built the same night (Sept 11)
+
+The touch-reduction list below is no longer a plan. On `claude/automation-revenue-strategy-is82xt`
+(which also folds in the 83 deployed-branch commits):
+
+- **The hunt spends its quota across the day.** `huntTick.ts` slices the daily budget over the
+  15-minute ticks — a few searches and one demo per tick — and the work finishes after the tick
+  responds. Before: ~1 demo/day regardless of quota.
+- **Email before any model call.** A lead with no public address is set aside (`no_email`, phone
+  intact, its own Prospects chip) at zero cost. Leads with a website are the unattended build order.
+- **Zero-click sales.** The demo's HTML is stashed at build time; a payment publishes it. A paid
+  care plan pins its package and books the one onboarding reminder.
+- **Replies land.** Resend's `email.received` event is handled by the existing webhook; the body is
+  fetched and handed to the reply path. No forwarder, no extra secret.
+- **The slate.** The Queue approves the day's cold pitches in one keypress (Shift+A); flagged
+  pitches are held out. The waking moment and the morning brief lead with it.
+- **Follow-ups draft without an OpenAI key** (shared model seam). Default model moved to the
+  current Sonnet, cheaper per token.
+- **The monthly offer is the zero-touch care plan** ($299/mo default). Readiness on Win Clients
+  now has a fourth gate: *Get paid + go live with no click*.
+- **Not done, on purpose:** the server never self-approves a cold pitch. The class is on the trust
+  dial for its streak, with no Grant button. The daily protocol is `docs/daily-run.md`.
+
 ## The verdict
 
 **Run the local-business funnel that is already built, sell one thing, and touch it for ten

@@ -11,10 +11,12 @@ function check(name: string, cond: boolean) {
 const ALL: ReadinessInputs = {
   appOriginSet: true, placesKeySet: true, resendKeySet: true,
   fromEmail: 'me@my.co', physicalAddress: '1 Main St, Town', outboundEnabled: true, clockArmed: true,
+  huntOrderActive: true, netlifyTokenSet: true, stripeWebhookSet: true, websiteLinkSet: true, carePlanLinkSet: true, notifyChannel: true,
 };
 const none: ReadinessInputs = {
   appOriginSet: false, placesKeySet: false, resendKeySet: false,
   fromEmail: null, physicalAddress: null, outboundEnabled: false, clockArmed: false,
+  huntOrderActive: false, netlifyTokenSet: false, stripeWebhookSet: false, websiteLinkSet: false, carePlanLinkSet: false, notifyChannel: false,
 };
 
 const full = huntReadiness(ALL);
@@ -49,6 +51,15 @@ check('kill switch off leaves hunting intact', switchedOff.canHunt);
 // Clock gates ONLY the automatic daily hunt — on-demand hunt/send still work.
 const noClock = huntReadiness({ ...ALL, clockArmed: false });
 check('unarmed clock blocks only the auto daily hunt', noClock.canHunt && noClock.canSend && !noClock.canAutoHunt);
+const noOrder = huntReadiness({ ...ALL, huntOrderActive: false });
+check('no daily hunt order → auto gate closed, nothing else', noOrder.canHunt && noOrder.canSend && noOrder.canSell && !noOrder.canAutoHunt);
+const noLinks = huntReadiness({ ...ALL, carePlanLinkSet: false });
+check('a missing payment link closes only the sell gate', noLinks.canHunt && noLinks.canSend && noLinks.canAutoHunt && !noLinks.canSell);
+check('no hosting token closes the sell gate (every sale would wait on a click)', !huntReadiness({ ...ALL, netlifyTokenSet: false }).canSell);
+check('no Stripe webhook closes the sell gate', !huntReadiness({ ...ALL, stripeWebhookSet: false }).canSell);
+check('sell items name their fix', full.items.filter((i) => i.need === 'sell').length === 4 && full.items.filter((i) => i.need === 'sell').every((i) => i.fix.length > 20));
+check('fully ready names the operator\'s one job', readinessLine(full).includes('slate'));
+check('ready-but-unpaid points at the payment links', readinessLine(noLinks).includes('payment links'));
 
 // The summary line reflects the real state.
 check('summary is fully-ready when everything is set', readinessLine(full).startsWith('Ready'));
