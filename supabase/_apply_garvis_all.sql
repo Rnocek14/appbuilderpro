@@ -7545,6 +7545,301 @@ alter table public.leads add column if not exists preview_site_id uuid reference
 
 create index if not exists idx_leads_preview_site on public.leads(preview_site_id, created_at desc);
 
+-- ======== supabase/migrations/app_0139_re_facts.sql ========
+-- app_0139_re_facts.sql — APPROVED FACTS, WITH SOURCES AND A REVIEW DATE.
+-- The real-estate audit's gap 3 (docs/real-estate-marketing-implementation.md §2.9): nothing in this
+-- schema pairs a claim with a source URL AND a date it must be re-checked. garvis_knowledge (app_0005)
+-- comes closest — claim + free-text source + confidence + approved_at — but it has no source URL, no
+-- re-review date, and no community scope, so the additive changes would have been these tables anyway.
+--
+-- The rule these tables exist to enforce: a community fact may appear in published copy ONLY while it
+-- is verified, carries at least one source row, and has not passed its review date. Anything else
+-- renders as a visible hole and blocks the queue — a missing fact must stay missing, never become a
+-- confident sentence. Enforced in reFactsCore.ts (pure, CI-verified) AND re-checked server-side at
+-- publish, the same three-layer shape the AI-disclosure gate already uses.
+--
+-- Additive + idempotent. Owner RLS, world-pinned (the app_0036/app_0087 house pattern).
+
+-- ---------- communities (the territory a fact belongs to) ----------
+create table if not exists public.re_communities (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.profiles(id) on delete cascade,
+  world_id      uuid references public.knowledge_worlds(id) on delete set null,
+  slug          text not null,                     -- stable id: 'abbey-springs'
+  name          text not null,
+  kind          text not null default 'community'
+                  check (kind in ('community', 'association', 'lake', 'town', 'development')),
+  boundary_note text,                              -- the exact boundary IN WORDS. never inferred geometry
+  notes         text,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  unique (owner_id, slug)
+);
+alter table public.re_communities enable row level security;
+drop policy if exists "re_communities owner all" on public.re_communities;
+create policy "re_communities owner all" on public.re_communities
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_re_communities_world on public.re_communities(world_id, name);
+
+drop trigger if exists trg_re_communities_touch on public.re_communities;
+create trigger trg_re_communities_touch before update on public.re_communities
+  for each row execute function public.touch_updated_at();
+
+-- ---------- facts ----------
+-- status: draft (nobody checked it) → verified (a named human did) → stale (past its review date,
+-- set by the reader, not by a job) → retired (no longer true; kept, never deleted).
+create table if not exists public.re_facts (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.profiles(id) on delete cascade,
+  world_id      uuid references public.knowledge_worlds(id) on delete set null,
+  community_id  uuid references public.re_communities(id) on delete cascade,
+  claim         text not null,                     -- "Abbey Springs dues are billed quarterly"
+  value_text    text,                              -- the specific value, AS VERIFIED. never computed
+  status        text not null default 'draft'
+                  check (status in ('draft', 'verified', 'stale', 'retired')),
+  reviewed_at   timestamptz,
+  review_due_at timestamptz,                       -- null = evergreen; a date = re-check by then
+  reviewed_by   text,                              -- WHO checked it. a person, named
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+alter table public.re_facts enable row level security;
+drop policy if exists "re_facts owner all" on public.re_facts;
+create policy "re_facts owner all" on public.re_facts
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_re_facts_community on public.re_facts(community_id, status);
+create index if not exists idx_re_facts_due on public.re_facts(owner_id, review_due_at) where review_due_at is not null;
+
+drop trigger if exists trg_re_facts_touch on public.re_facts;
+create trigger trg_re_facts_touch before update on public.re_facts
+  for each row execute function public.touch_updated_at();
+
+-- ---------- sources ----------
+-- A fact with no source row is never citable, whatever its status says. The quote is the fragment
+-- that actually supports the claim — so a later reviewer can check the source without re-reading it.
+create table if not exists public.re_fact_sources (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles(id) on delete cascade,
+  fact_id     uuid not null references public.re_facts(id) on delete cascade,
+  url         text,
+  title       text,
+  source_kind text not null default 'official'
+                check (source_kind in ('official', 'association', 'document', 'person', 'observation')),
+  quote       text,
+  captured_at timestamptz not null default now(),
+  note        text
+);
+alter table public.re_fact_sources enable row level security;
+drop policy if exists "re_fact_sources owner all" on public.re_fact_sources;
+create policy "re_fact_sources owner all" on public.re_fact_sources
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create index if not exists idx_re_fact_sources_fact on public.re_fact_sources(fact_id, captured_at desc);
+
+-- ======== supabase/migrations/app_0140_post_versions.sql ========
+-- app_0140_post_versions.sql — THE APPROVAL BINDS TO THE CONTENT, NOT TO A ROW ID.
+-- The real-estate audit's gap 1 (docs/real-estate-marketing-implementation.md §2.2). Today a
+-- publish_post approval carries only { post_row_id }, and social-publish re-reads body, platforms,
+-- media_urls and scheduled_for from the MUTABLE social_posts row at send time — so editing a post
+-- after approval changes what publishes, and app_0069's payload hash cannot see it. social-publish
+-- says so itself: "the payload hash alone can't protect body/media".
+--
+-- The house already solved this once, for content weeks: the approval carries a pieces_hash and the
+-- drain re-hashes the current content before executing (standing-worker, "The content changed AFTER
+-- the decision — the decision no longer covers it. Refuse."). This is that pattern for posts, with a
+-- durable version row behind it.
+--
+-- WHY A TABLE AND NOT JUST A BIGGER PAYLOAD: the version is also what the operator re-reads later
+-- ("what exactly did I approve?"), what the reconciler compares against, and what carries the fact
+-- ids and media digests. artifact_versions (app_0026) is the nearest shape but is NOT immutable —
+-- its policy is `for all`, so an owner can rewrite a snapshot. This one grants SELECT + INSERT only,
+-- and a trigger refuses UPDATE/DELETE even for the service role (the app_0123 accrete-only precedent).
+--
+-- Additive + idempotent. Nothing here changes how an existing version-less approval behaves.
+
+create table if not exists public.post_versions (
+  id              uuid primary key default gen_random_uuid(),
+  owner_id        uuid not null references public.profiles(id) on delete cascade,
+  post_id         uuid not null references public.social_posts(id) on delete cascade,
+  version         int not null,                    -- assigned by trigger when null; 1, 2, 3 …
+  body            text not null default '',
+  platforms       text[] not null default '{}',
+  media_urls      text[] not null default '{}',
+  -- url -> sha256 of the bytes AT APPROVAL TIME. generate-video and render-video upload with
+  -- upsert:true to a deterministic path, so a re-render silently replaces the bytes behind a live
+  -- URL — binding the text without binding the bytes would be a half-binding.
+  media_digests   jsonb not null default '{}'::jsonb,
+  ai_provenance   jsonb,
+  scheduled_for   timestamptz,                     -- the instant
+  scheduled_local text,                            -- 'YYYY-MM-DDTHH:mm' exactly as the operator typed it
+  schedule_tz     text not null default 'America/Chicago',
+  fact_ids        uuid[] not null default '{}',    -- every re_fact this copy relies on
+  compliance_line text,                            -- the brokerage line as it will publish
+  content_hash    text not null,                   -- sha256 of the canonical version (payloadHash.ts)
+  created_at      timestamptz not null default now(),
+  unique (post_id, version)
+);
+alter table public.post_versions enable row level security;
+
+-- SELECT + INSERT only. Deliberately NOT `for all` — a version is a record of a decision.
+drop policy if exists "post_versions owner all" on public.post_versions;
+drop policy if exists "post_versions owner read" on public.post_versions;
+create policy "post_versions owner read" on public.post_versions
+  for select using (owner_id = auth.uid());
+drop policy if exists "post_versions owner insert" on public.post_versions;
+create policy "post_versions owner insert" on public.post_versions
+  for insert with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.social_posts p where p.id = post_id and p.owner_id = auth.uid())
+  );
+
+create index if not exists idx_post_versions_post on public.post_versions(post_id, version desc);
+
+-- Version numbering, race-safe enough: the trigger fills the next number, the unique constraint
+-- settles a tie (the loser retries with a fresh number).
+create or replace function public.assign_post_version()
+returns trigger language plpgsql as $$
+begin
+  if new.version is null or new.version <= 0 then
+    select coalesce(max(version), 0) + 1 into new.version
+      from public.post_versions where post_id = new.post_id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_post_versions_number on public.post_versions;
+create trigger trg_post_versions_number before insert on public.post_versions
+  for each row execute function public.assign_post_version();
+
+-- Immutability at rest. RLS already withholds UPDATE/DELETE from the owner; this also stops a
+-- service-role writer (every edge function) from rewriting history by accident.
+create or replace function public.post_versions_immutable()
+returns trigger language plpgsql as $$
+begin
+  raise exception 'post_versions is immutable: approve a NEW version instead of changing an approved one';
+end $$;
+drop trigger if exists trg_post_versions_no_update on public.post_versions;
+create trigger trg_post_versions_no_update before update or delete on public.post_versions
+  for each row execute function public.post_versions_immutable();
+
+-- ---------- social_posts becomes a header ----------
+alter table public.social_posts add column if not exists current_version_id uuid references public.post_versions(id) on delete set null;
+alter table public.social_posts add column if not exists campaign_id        uuid references public.marketing_campaigns(id) on delete set null;
+-- The final platform URL — the thing that turns "we think it went out" into "here it is".
+-- provider_post_id is the provider's envelope id, not a link anyone can open.
+alter table public.social_posts add column if not exists post_urls          jsonb;   -- { instagram: 'https://…' }
+alter table public.social_posts add column if not exists claimed_at         timestamptz;
+alter table public.social_posts add column if not exists idempotency_key    text;    -- the reconcile key
+create index if not exists idx_social_posts_campaign on public.social_posts(campaign_id) where campaign_id is not null;
+
+-- 'in_flight': sent to the provider, answer unknown. Today there is no sending state at all, so a
+-- timed-out row is indistinguishable from a fresh one — and a 30s abort can fire AFTER the provider
+-- accepted the post, leaving it live on the platform while our row says 'queued'.
+alter table public.social_posts drop constraint if exists social_posts_status_check;
+alter table public.social_posts add constraint social_posts_status_check
+  check (status in ('queued', 'in_flight', 'scheduled', 'posted', 'failed', 'canceled'));
+
+alter table public.social_post_metrics add column if not exists post_url text;
+
+-- ---------- cluster_files: rendered video has never been storable ----------
+-- render-video inserts kind:'video' into a CHECK that allows only ('image','doc','csv','other') and
+-- the insert's error is not checked — so no rendered video ever gets a row, and the disclosure gate
+-- can only see provenance when the POST row carries it. Widen the constraint; the gate gains sight.
+alter table public.cluster_files drop constraint if exists cluster_files_kind_check;
+alter table public.cluster_files add constraint cluster_files_kind_check
+  check (kind in ('image', 'video', 'audio', 'doc', 'csv', 'other'));
+
+-- The disclosure gate looks media up BY URL (social-publish: .in('url', draft.mediaUrls)); there was
+-- no index for that predicate.
+create index if not exists idx_cluster_files_url on public.cluster_files(url);
+
+-- ======== supabase/migrations/app_0141_re_campaigns_outcomes.sql ========
+-- app_0141_re_campaigns_outcomes.sql — THE LAST TWO LEGS: an inquiry that names what caused it, and
+-- an outcome that names what it became.
+-- docs/real-estate-marketing-implementation.md §2.8/§2.11: only two tables in the entire schema
+-- reference social_posts (metrics and channel_episodes), leads carries a free-text `source` and no
+-- campaign or post reference, and there is no record of a realtor business outcome anywhere. The
+-- pattern to copy is app_0086_invoice_provenance ("REVENUE KNOWS WHERE IT CAME FROM"), which already
+-- links an invoice to its lead and campaign — this is the same idea, one step earlier in the funnel.
+--
+-- No new campaign table: marketing_campaigns (app_0010) already documents "mom's real-estate
+-- business" as its own example subject, and there are three parallel campaign namespaces already.
+-- Additive + idempotent.
+
+-- ---------- campaigns gain scope ----------
+alter table public.marketing_campaigns add column if not exists world_id     uuid references public.knowledge_worlds(id) on delete set null;
+alter table public.marketing_campaigns add column if not exists community_id uuid references public.re_communities(id) on delete set null;
+alter table public.marketing_campaigns add column if not exists offer        text;   -- the ONE thing this campaign asks for
+alter table public.marketing_campaigns add column if not exists owner_name   text;   -- the named human who answers it
+alter table public.marketing_campaigns add column if not exists starts_on    date;
+alter table public.marketing_campaigns add column if not exists ends_on      date;
+create index if not exists idx_marketing_campaigns_world on public.marketing_campaigns(world_id, created_at desc);
+
+-- ---------- leads: a phone call is an inquiry ----------
+-- leads.email is not null and captureLead refuses anything failing its EMAIL_RE, so the highest-intent
+-- real-estate inquiry — someone calling — cannot be recorded at all. Loosening a not-null on this
+-- table has precedent: app_0138 did exactly that for world_id.
+alter table public.leads alter column email drop not null;
+do $$ begin
+  alter table public.leads add constraint leads_email_or_phone
+    check (email is not null or phone is not null) not valid;  -- not valid: every existing row has an email
+exception when duplicate_object then null; end $$;
+
+-- ---------- leads: attribution that is a foreign key, not a string ----------
+alter table public.leads add column if not exists campaign_id      uuid references public.marketing_campaigns(id) on delete set null;
+alter table public.leads add column if not exists post_id          uuid references public.social_posts(id) on delete set null;
+alter table public.leads add column if not exists community_id     uuid references public.re_communities(id) on delete set null;
+alter table public.leads add column if not exists first_source     text;
+alter table public.leads add column if not exists last_source      text;
+alter table public.leads add column if not exists stated_influence text;  -- what the prospect SAID, verbatim
+create index if not exists idx_leads_campaign on public.leads(campaign_id, created_at desc) where campaign_id is not null;
+create index if not exists idx_leads_post on public.leads(post_id) where post_id is not null;
+
+-- ---------- a booked meeting can become an outcome ----------
+-- appointments (app_0109) stores customer_name/email/phone with no CRM link, so a booking never joins
+-- the person it belongs to.
+alter table public.appointments add column if not exists lead_id    uuid references public.leads(id) on delete set null;
+alter table public.appointments add column if not exists contact_id uuid references public.contacts(id) on delete set null;
+create index if not exists idx_appointments_lead on public.appointments(lead_id) where lead_id is not null;
+
+-- ---------- outcomes ----------
+-- attribution 'unknown' is a FIRST-CLASS value. The operating plan is explicit that attribution must
+-- be allowed to stay unknown; a system that forces a guess gets lied to. 'stated' means the prospect
+-- said so; 'inferred' means a src tag or a timing match; 'unknown' means nobody knows.
+create table if not exists public.re_outcomes (
+  id             uuid primary key default gen_random_uuid(),
+  owner_id       uuid not null references public.profiles(id) on delete cascade,
+  world_id       uuid references public.knowledge_worlds(id) on delete set null,
+  lead_id        uuid references public.leads(id) on delete set null,
+  campaign_id    uuid references public.marketing_campaigns(id) on delete set null,
+  appointment_id uuid references public.appointments(id) on delete set null,
+  kind           text not null
+                   check (kind in ('qualified_conversation', 'appointment_set', 'appointment_held',
+                                   'listing_signed', 'closed', 'lost')),
+  occurred_on    date not null,
+  note           text,
+  value_usd      numeric,
+  attribution    text not null default 'unknown'
+                   check (attribution in ('stated', 'inferred', 'unknown')),
+  created_at     timestamptz not null default now()
+);
+alter table public.re_outcomes enable row level security;
+drop policy if exists "re_outcomes owner all" on public.re_outcomes;
+create policy "re_outcomes owner all" on public.re_outcomes
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_re_outcomes_world on public.re_outcomes(world_id, occurred_on desc);
+create index if not exists idx_re_outcomes_campaign on public.re_outcomes(campaign_id, kind) where campaign_id is not null;
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

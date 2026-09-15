@@ -28,6 +28,7 @@ interface PostRow {
   id: string; owner_id: string; world_id: string | null; platforms: string[];
   provider_post_id: string; status: string; posted_at: string | null;
   scheduled_for: string | null; last_synced_at: string | null;
+  post_urls: Record<string, string> | null;
 }
 
 /** Instagram's field names are web-confirmed; other platforms are best-effort — the raw object is
@@ -75,7 +76,7 @@ async function syncOwner(
   const cutoff = new Date(now - WINDOW_MS).toISOString();
   const staleBefore = new Date(now - STALE_AFTER_MS).toISOString();
   const { data: posts } = await admin.from('social_posts')
-    .select('id, owner_id, world_id, platforms, provider_post_id, status, posted_at, scheduled_for, last_synced_at')
+    .select('id, owner_id, world_id, platforms, provider_post_id, status, posted_at, scheduled_for, last_synced_at, post_urls')
     .eq('owner_id', uid).not('provider_post_id', 'is', null).in('status', ['posted', 'scheduled'])
     .or(`last_synced_at.is.null,last_synced_at.lt.${staleBefore}`)
     .order('created_at', { ascending: false }).limit(MAX_POSTS_PER_OWNER);
@@ -111,7 +112,13 @@ async function syncOwner(
         await admin.from('social_posts').update({ last_synced_at: new Date().toISOString() }).eq('id', row.id);
         break;
       }
-      if (!res.ok) { skipped++; continue; }
+      if (!res.ok) {
+        // Stamp even on a failure that is not plan-gating (404/429/5xx). Without this the row keeps
+        // matching `last_synced_at.is.null` and is re-fetched on every 6-hour tick forever, crowding
+        // out posts that could actually sync.
+        await admin.from('social_posts').update({ last_synced_at: new Date().toISOString() }).eq('id', row.id);
+        skipped++; continue;
+      }
 
       // Response shape: { <platform>: { analytics: {...} } , ...} (per Ayrshare docs research).
       let sawAnalytics = false;
@@ -124,10 +131,23 @@ async function syncOwner(
         // (e.g. status fields) — keep it only if the raw object has content worth keeping.
         if (Object.values(m).every((v) => v === null) && Object.keys(analytics).length === 0) continue;
         sawAnalytics = true;
+        // The permalink, when the provider hands one back here. A post published before this
+        // column existed, or scheduled provider-side, gets its URL on the first successful sync.
+        const permalink = ['postUrl', 'url', 'permalink', 'postURL']
+          .map((k) => (analytics as Record<string, unknown>)[k])
+          .find((v) => typeof v === 'string' && /^https?:\/\//i.test(v as string)) as string | undefined;
         await admin.from('social_post_metrics').upsert({
           owner_id: uid, post_id: row.id, world_id: row.world_id, platform,
-          ...m, raw: analytics, synced_at: new Date().toISOString(),
+          ...m, ...(permalink ? { post_url: permalink } : {}),
+          raw: analytics, synced_at: new Date().toISOString(),
         }, { onConflict: 'post_id,platform' });
+        if (permalink) {
+          const prior = (row as { post_urls?: Record<string, string> | null }).post_urls ?? {};
+          if (prior[platform] !== permalink) {
+            await admin.from('social_posts')
+              .update({ post_urls: { ...prior, [platform]: permalink } }).eq('id', row.id);
+          }
+        }
       }
 
       // Reconcile the terminal-'scheduled' gap ONLY on evidence (review fix): a 2xx envelope with
@@ -140,7 +160,13 @@ async function syncOwner(
       }
       await admin.from('social_posts').update(patch).eq('id', row.id);
       if (sawAnalytics) synced++; else skipped++;
-    } catch { skipped++; }
+    } catch {
+      // Same reasoning as the non-2xx branch: a thrown/timed-out fetch must not leave the row in the
+      // never-synced set permanently.
+      await admin.from('social_posts').update({ last_synced_at: new Date().toISOString() }).eq('id', row.id)
+        .then(() => {}, () => {});
+      skipped++;
+    }
   }
   return { synced, skipped, available };
 }

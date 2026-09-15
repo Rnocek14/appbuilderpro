@@ -128,5 +128,43 @@ ok('open house back: no forced price hole (price is optional at an open house)',
 ok('open house back: offer is the invite, not a repeat of address+time', oh.postcard.back.offer === 'Come see it in person.');
 ok('farm (find_sellers) keeps the concept back, not listing facts', !farm.postcard.back.body.includes('Offered at'));
 
+// ---- NOBODY ELSE'S STATE IS ASSERTED ------------------------------------------------------------
+// The audit found `"Another happy seller"` shipping as the unconditional body of every just_sold
+// campaign, plus 'The right marketing brought the right buyer.' and 'Move-in ready.' as fallbacks.
+// None of those is a fact anyone checked: they are claims about a client's feelings and about a
+// property's condition. The rule is not "avoid warm words" — offering to help is the agent's own
+// statement to make. It is that copy never asserts someone else's state or a property's condition
+// that nobody verified. This is the bespokeHonest()/automationCards.verify precedent: an honesty
+// rule belongs in CI, not in a comment.
+const FABRICATED = [
+  /\bhappy (seller|buyer|client|customer|home ?owner)s?\b/i,
+  /\b(another|one more) (happy|delighted|thrilled|satisfied)\b/i,
+  /\b(thrilled|delighted|overjoyed|couldn'?t be happier)\b/i,
+  /\bmove[- ]in ready\b/i,
+  /\bturn[- ]key\b/i,
+  /\bdream home\b/i,
+  /\bthe right marketing brought\b/i,
+  /\b(smooth|seamless|stress[- ]free) (sale|closing|process|transaction)\b/i,
+  /\bsold (itself|over asking)\b/i,
+];
+const everyCampaign = [...CAMPAIGN_TYPES, ...GENERIC_CAMPAIGNS].flatMap((t) => [
+  // filled in, and deliberately bare — the bare form is where fabricated fallbacks used to hide
+  composeCampaign({ type: t.id, agentName: 'Jane Doe', agentPhone: '555-0100', address: '9 Oak St',
+    price: '$800,000', beds: '4', baths: '3', area: 'Lake Geneva', highlight: 'Remodeled kitchen',
+    brand, openWhen: 'Sat 1–3pm' } as CampaignInput),
+  composeCampaign({ type: t.id, agentName: 'Jane Doe' } as CampaignInput),
+]);
+for (const pattern of FABRICATED) {
+  const offender = everyCampaign.find((c) => pattern.test(JSON.stringify(c)));
+  ok(`no generated copy asserts ${String(pattern)}`, !offender);
+}
+ok('a just_sold campaign with no highlight leaves a VISIBLE hole instead of inventing one',
+  (() => {
+    const bare = composeCampaign({ type: 'just_sold', address: '9 Oak St', agentName: 'Jane' } as CampaignInput);
+    return JSON.stringify(bare).includes('[EDIT:');
+  })());
+ok('the agent may still offer her own help (the rule is about OTHER people, not warmth)',
+  /happy to|glad to/i.test(JSON.stringify(everyCampaign)));
+
 console.log(`\ncampaignCore.verify: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

@@ -58,9 +58,9 @@ else
   echo "  MIGRATION FAILURE (above) — the bundle does not apply"; exit 1
 fi
 
-say "5/5  Pilot suites (substrate · isolation · query shapes)"
+say "5/5  Pilot suites (substrate · isolation · query shapes · post binding)"
 FAILED=0
-for f in 10-substrate 20-isolation 21-isolation-negatives 30-query-shapes; do
+for f in 10-substrate 20-isolation 21-isolation-negatives 30-query-shapes 40-post-binding; do
   out=$(su "$PG" -c "psql -q -d $DB -f $WORK/$f.sql" 2>&1 | sed 's/^psql[^ ]* NOTICE:  //')
   echo "$out" | grep -E 'PASS|FAIL|ERROR' || true
   if echo "$out" | grep -qE '^FAIL|ERROR'; then FAILED=1; fi
