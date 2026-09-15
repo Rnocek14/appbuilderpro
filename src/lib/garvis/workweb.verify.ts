@@ -7,7 +7,7 @@ import {
   ARCHETYPES, FLAVORS, TOOL_IDS, makeCharter, parseCharter, toolsFor,
   MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, WEB_TEMPLATES, templateById, templateForWeb,
   flattenTemplate, validateTemplate, parseAudienceCsv, rollupWeb, deriveStatus, canvasNodeForArea,
-  type Archetype,
+  type Archetype, type Flavor,
 } from './workweb';
 import { PLAYS, LAKEFRONT_SELLER_PLAY, playById, validatePlay, DEFAULT_LAKE_GENEVA_CONTEXT } from './plays';
 
@@ -126,6 +126,32 @@ check('parseCharter handles null/undefined/strings', parseCharter(null) === null
   check('a charterless cluster opens nothing', canvasNodeForArea([{ slug: 'x', charter: null }], 'x') === null);
   check('a merch area opens the merch node (the capsule room)',
     canvasNodeForArea([{ slug: 'capsule-merch', charter: makeCharter('studio', 'merch') }], 'capsule-merch') === 'merch');
+}
+
+// ---- the runtime flavor list cannot drift from the type union -----------------------------------
+// parseCharter validates against FLAVORS, so a flavor in the union but missing from the array is
+// SILENTLY downgraded to 'generic' — the studio simply stops rendering, with no error anywhere.
+// FLAVOR_WORKSHOPS is a Record<Flavor, …>, so the compiler keeps its keys complete; this bridges it
+// to the runtime list.
+{
+  // A Record<Flavor, true> the COMPILER must keep complete — adding a flavor to the union without
+  // adding it here is a build error, and this suite then proves the runtime list agrees.
+  const EVERY_FLAVOR: Record<Flavor, true> = {
+    generic: true, direct_mail: true, email: true, social: true, video: true, landing: true,
+    market: true, brand: true, crm: true, lists: true, ads: true, feature_lab: true, assist: true,
+    deliver: true, data: true, tracker: true, content_growth: true, lead_engine: true,
+    listing_campaign: true, merch: true,
+  };
+  const fromType = Object.keys(EVERY_FLAVOR).sort();
+  const atRuntime: string[] = [...FLAVORS].sort();
+  check('every flavor in the type union is in the runtime FLAVORS list',
+    fromType.every((f) => atRuntime.includes(f)));
+  check('and the runtime list invents none that the union lacks',
+    atRuntime.every((f) => fromType.includes(f)));
+  check('a charter with an unknown flavor degrades to generic, never throws',
+    parseCharter({ archetype: 'studio', flavor: 'not-a-flavor' })?.flavor === 'generic');
+  check('a listing_campaign charter survives parsing (it is a real studio)',
+    parseCharter({ archetype: 'studio', flavor: 'listing_campaign' })?.flavor === 'listing_campaign');
 }
 
 console.log(`\nworkweb.verify: ${passed} passed, ${failed} failed`);

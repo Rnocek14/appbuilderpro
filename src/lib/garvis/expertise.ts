@@ -550,12 +550,43 @@ sell-through, not guesses.${NOTE}`,
   },
 ];
 
+const LISTING_CAMPAIGN_PACK: SeedArtifact[] = [
+  {
+    slug: 'campaign-craft', kind: 'doc', title: 'How this campaign studio works',
+    detail: `${H('Verified facts → a draft → your approval → what actually published — {{business_name}}')}
+THE CHAIN: you record a fact about a community WITH its source and the date it must be re-checked →
+the studio drafts only from facts that are still good → you approve the exact wording, destination
+and time in the Queue → the approved VERSION publishes, not whatever the row says later → the
+platform link and the real numbers come back → an inquiry is attributed to the post that caused it.
+A FACT IS A CLAIM PLUS A SOURCE PLUS A DATE. Association dues, rental rules, water access, what the
+pool season actually is — each with where you checked it and when it needs checking again. A claim
+with no source is not a fact here, and the studio will not publish one.
+MISSING STAYS MISSING: a fact that is unverified, unsourced or past its review date renders as a
+visible [VERIFY: …] hole. The hole blocks the queue. It is never filled with something plausible.
+THE APPROVAL BINDS THE CONTENT: edit the words, the destination, the media or the time after
+approving, and it needs approving again. That is the point — what you said yes to is what goes out.
+NOTHING SENDS ITSELF: every post is one pending decision in your Queue, every time.${NOTE}`,
+  },
+  {
+    slug: 'campaign-starter', kind: 'doc', title: 'The first campaign checklist',
+    detail: `${H('One community, all the way through, before adding a second')}
+□ One community recorded, with its boundary described IN WORDS — not inferred from a map or a
+  neighboring listing.
+□ Ten facts owners actually ask about, each with a source link or a quoted line, and a review date.
+□ The brokerage line set, exactly as your brokerage requires it. It rides every post.
+□ One post drafted from those facts, approved by you, and published — with its platform link stored.
+□ One inquiry recorded against that post, and what came of it, even if the answer is "nothing yet".
+□ Attribution left UNKNOWN when it is unknown. A forced guess makes every later number a lie.
+Only after one community travels the whole chain does a second one make sense.${NOTE}`,
+  },
+];
+
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
   feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
   tracker: TRACKER_PACK, content_growth: CONTENT_GROWTH_PACK, lead_engine: LEAD_ENGINE_PACK,
-  merch: MERCH_STUDIO,
+  listing_campaign: LISTING_CAMPAIGN_PACK, merch: MERCH_STUDIO,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */
