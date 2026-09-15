@@ -195,7 +195,8 @@
     "verify:refacts": "tsx src/lib/garvis/reFacts.verify.ts",
     "verify:publishgate": "tsx src/lib/garvis/publishGate.verify.ts",
     "verify:reconcile": "tsx src/lib/garvis/reconcile.verify.ts",
-    "verify:redraft": "tsx src/lib/garvis/reDraft.verify.ts"
+    "verify:redraft": "tsx src/lib/garvis/reDraft.verify.ts",
+    "verify:reattribution": "tsx src/lib/garvis/reAttribution.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

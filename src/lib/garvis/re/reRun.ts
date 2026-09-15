@@ -128,7 +128,7 @@ export function composeDraft(input: {
 export async function queueDraft(input: {
   text: string; platforms: string[]; mediaUrls?: string[]; worldId: string | null;
   campaignId?: string | null; factIds: string[]; complianceLine?: string | null;
-  scheduleLocal?: string | null; scheduleTz?: string;
+  scheduleLocal?: string | null; scheduleTz?: string; linkUrl?: string | null;
 }): Promise<{ postId: string; versionId: string; warnings: string[] }> {
   if (hasUnresolvedHole(input.text)) {
     throw new Error('This draft still has an unverified fact in it — fill or remove every [VERIFY: …] first.');
@@ -140,6 +140,7 @@ export async function queueDraft(input: {
     scheduleLocal: input.scheduleLocal ?? null,
     scheduleTz: input.scheduleTz ?? 'America/Chicago',
     mediaDigests: mediaUrls.length ? await computeMediaDigests(mediaUrls) : {},
+    linkUrl: input.linkUrl ?? null,
   };
   return queueSocialPost({
     text: input.text, platforms: input.platforms, mediaUrls,

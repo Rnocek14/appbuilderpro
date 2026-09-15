@@ -44,6 +44,7 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
   const [blockers, setBlockers] = useState<string[]>([]);
   const [scheduleLocal, setScheduleLocal] = useState('');
   const [complianceLine, setComplianceLine] = useState('');
+  const [linkUrl, setLinkUrl] = useState('');
   const [agentName, setAgentName] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -99,6 +100,7 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
         text, platforms: PLATFORMS, worldId, factIds,
         complianceLine: complianceLine.trim() || null,
         scheduleLocal: scheduleLocal || null, scheduleTz: TZ,
+        linkUrl: linkUrl.trim() || null,
       });
       for (const w of r.warnings) onToast('info', w);
       onToast('success', 'Sent to the Queue — it publishes only after you approve it there.');
@@ -199,6 +201,21 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
               </ul>
             </div>
           )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="A link in this post (optional)"
+              className="w-72"
+              aria-label="A link in this post"
+            />
+            <span className="text-[11px] text-forge-dim">
+              {linkUrl.trim() && text.includes(linkUrl.trim())
+                ? 'It will carry this post\u2019s tracking tag, so an inquiry through it names this post.'
+                : 'Paste it into the post too — only a link that appears in the text gets tagged.'}
+            </span>
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <Input

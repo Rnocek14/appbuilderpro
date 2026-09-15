@@ -3,7 +3,9 @@
 **Companion to** the *Lake Geneva Marketing and AI Operating Plan* (September 14, 2026).
 **Repository snapshot inspected:** `2c61d03294db856b3da1c92b592102e62c5c192a` — the same commit the
 operating plan reviewed, and the current tip of `main`.
-**Status:** audit + proposal. No code changed by this document.
+**Status:** audit, proposal, and — as of the commits listed in §8 — a built Phase 1 spine.
+The audit (§§0–2) describes the repository as it was found. The proposal (§§3–7) describes what was
+then designed. §8 records what has actually been built since, and what has not.
 
 ---
 
@@ -877,6 +879,8 @@ deliberate cancel and a deliberate failure so the failure paths are seen working
 
 ---
 
+---
+
 ## 7. What this preserves
 
 Nothing in Phase 1 removes a capability. The general app builder, the ventures, the lead engine, the
@@ -885,3 +889,44 @@ replaced; the publish path keeps its two callers, its atomic claim and its discl
 metrics reader keeps its honest degradation. The additions are: one studio flavor, one small
 template, three migrations, five pure cores, and the removal of a handful of sentences that claimed
 things nobody verified.
+
+---
+
+## 8. Implementation status
+
+Built and gated (`tsc` · 179 verify suites · build · `deno check` on every edge function · the full
+e2e suite · the shadow DB on real Postgres):
+
+| Phase 1 item | State | Where |
+|---|---|---|
+| Migrations `app_0139`–`app_0141` | **Built.** Applied to real Postgres with 17 shadow-DB checks proving the version is immutable, the constraints reject, and post → inquiry → outcome joins | `supabase/migrations/` |
+| The approval binds the content | **Built.** `post_versions` + `{post_row_id, version_id, content_hash}`; the publisher loads the version, not the row | `postVersionCore.ts`, `social-publish` |
+| Media bound by bytes | **Built.** Both ends hash the bytes; unverifiable is recorded as unverifiable, never as unchanged | `postVersionCore.bytesDigest` |
+| Auto-minted approvals refused on this rail | **Built.** `requested_by='garvis-auto'` cannot publish a bound post | `social-publish` |
+| Timeout → `in_flight` → reconciliation | **Built.** `not_posted` only on positive evidence; unknown never retries | `reconcileCore.ts`, `standing-worker` |
+| Final platform URL | **Built.** Captured at publish and on sync | `socialCore.platformUrls`, `social-sync` |
+| America/Chicago scheduling | **Built.** DST gap resolves forward and says so; ambiguity takes the first and says so | `reScheduleCore.ts` |
+| Facts with sources and review dates | **Built.** Three-layer gate: composer, queue, publisher | `reFactsCore.ts`, `app_0139` |
+| Brokerage line gates publication | **Built** | `publishGate.ts` |
+| Fabricated sentiment removed | **Built**, with CI asserting its absence across every generated default | `campaignCore.verify.ts` |
+| The Gina-facing surface | **Built.** A `listing_campaign` flavor, a five-area template, a studio that opens on the work | `CampaignStudio.tsx`, `workweb.ts` |
+| Inquiry attribution | **Built.** A post's link carries its own tag; the capture rail resolves it or attributes to nobody | `reAttributionCore.ts`, `leadIntake.ts` |
+| Phone-only inquiry | **Built.** The DB accepts it and the rail records it (no instant email touch — a call is answered by a call) | `app_0141`, `leadIntake.ts` |
+
+Not built, and deliberately:
+
+- **Media attachment**, which is what unlocks Instagram (`socialCore` correctly refuses a text-only
+  post there, so the studio posts to Facebook alone for now).
+- **Provider-side cancel.** `cancelSocialPost` refuses honestly for a provider-scheduled post rather
+  than marking something cancelled that would publish anyway. Wiring the delete needs the endpoint
+  verified against a real account — this audit has never called the API.
+- **`re_expenses`** (Phase 1b), the MCP adapter over `RE_ACTION_SPECS`, and everything in §4.
+
+Three defects found while building, all fixed: the runtime `FLAVORS` array is separate from the
+`Flavor` type union (a new flavor typechecks, then silently becomes `generic` at parse time — now
+bridged by a compiler-enforced check in `workweb.verify.ts`); a `listing_campaign` world routed to
+the marketing canvas with its studio behind *Advanced*; and `render-video` inserting a `kind` its own
+CHECK constraint forbade, so no rendered video ever got a provenance row.
+
+**Commits:** `78657bc` (audit) · `b469ae0` (verification pass) · `3c81ca9` (the binding) ·
+`e075d63` (reconciler + studio) · plus the attribution loop.

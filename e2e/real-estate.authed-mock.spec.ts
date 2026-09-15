@@ -235,6 +235,66 @@ test('the approval that leaves this page is bound to an immutable version, not t
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('a link in the post carries this post\'s own tracking tag, so an inquiry can name it', async ({ page }) => {
+  const errors = trackCrashes(page);
+  const writes: Writes[] = [];
+  await mockBackend(page, writes);
+  await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Campaign Studio' })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole('button', { name: /Draft Abbey Springs post/ }).click();
+  const draft = page.getByLabel('The draft post');
+  await expect(draft).toBeVisible();
+
+  const link = 'https://gina.example/abbey-springs';
+  await draft.fill(`Abbey Springs dues are billed quarterly. More here: ${link}`);
+  await page.getByLabel('A link in this post').fill(link);
+  await expect(page.getByText(/carry this post’s tracking tag/)).toBeVisible();
+
+  await page.getByRole('button', { name: /Send to the Queue/ }).click();
+  await expect(page.getByText(/Sent to the Queue/)).toBeVisible({ timeout: 15_000 });
+
+  const version = writes.find((w) => w.table === 'post_versions')?.body as Record<string, unknown> | undefined;
+  const body = String(version?.body ?? '');
+  // The tag points at THIS post, and it is in the approved version — so what was approved is what
+  // publishes, tracking included.
+  expect(body, 'the link is tagged in the APPROVED version').toContain(`src=re_p_${POST_ID}`);
+  expect(body).toContain('billed quarterly');
+
+  // And the post row was updated to the same text, so the two never disagree.
+  const bodyPatch = writes.filter((w) => w.table === 'social_posts')
+    .map((w) => w.body as Record<string, unknown>).find((b) => typeof b.body === 'string' && String(b.body).includes('src=re_p_'));
+  expect(bodyPatch, 'the stored post carries the same tagged text').toBeTruthy();
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('an untagged or absent link is left exactly as the operator wrote it', async ({ page }) => {
+  const errors = trackCrashes(page);
+  const writes: Writes[] = [];
+  await mockBackend(page, writes);
+  await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Campaign Studio' })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole('button', { name: /Draft Abbey Springs post/ }).click();
+  const draft = page.getByLabel('The draft post');
+  await expect(draft).toBeVisible();
+  await draft.fill('Abbey Springs dues are billed quarterly. Call me.');
+  // A link named but NOT present in the text must not be bolted on — that would publish a link the
+  // operator never wrote.
+  await page.getByLabel('A link in this post').fill('https://gina.example/not-in-the-post');
+  await expect(page.getByText(/only a link that appears in the text gets tagged/)).toBeVisible();
+
+  await page.getByRole('button', { name: /Send to the Queue/ }).click();
+  await expect(page.getByText(/Sent to the Queue/)).toBeVisible({ timeout: 15_000 });
+
+  const version = writes.find((w) => w.table === 'post_versions')?.body as Record<string, unknown> | undefined;
+  expect(String(version?.body ?? ''), 'no link was added').not.toContain('gina.example');
+  expect(String(version?.body ?? ''), 'and no tag was invented').not.toContain('src=re_p_');
+
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('copy with an unverified fact in it cannot be queued at all', async ({ page }) => {
   const errors = trackCrashes(page);
   const writes: Writes[] = [];

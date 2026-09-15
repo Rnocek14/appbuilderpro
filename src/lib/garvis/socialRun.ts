@@ -11,6 +11,7 @@ import { boundPayload, bytesDigest, versionHash, type PostVersionContent } from 
 import { describeSchedule, localToInstant, scheduleCaveat } from './reSchedule';
 import { complianceGate } from './publishGate';
 import { hasUnresolvedHole } from './reFacts';
+import { srcForPost, taggedLink } from './reAttribution';
 import type { AiProvenance } from './mediaProvenance';
 
 export interface SocialPostRow {
@@ -31,6 +32,11 @@ export interface PostBinding {
   /** url -> sha256 of the bytes now. Two generators re-upload to the same path, so a URL alone is
    *  not a stable reference to an image. */
   mediaDigests?: Record<string, string>;
+  /** A link inside the post that should carry this post's own tracking tag, so an inquiry arriving
+   *  through it can name the post that caused it. The tag is added AFTER the row exists (that is
+   *  where the id comes from) and before the version is written, so what is approved is what is
+   *  published — tag included. */
+  linkUrl?: string | null;
 }
 
 /** Hash the bytes behind each media URL, so the approval binds the picture and not just its address.
@@ -112,8 +118,25 @@ export async function queueSocialPost(input: {
   if (error || !row) throw new Error(`Could not queue the post: ${error?.message ?? 'unknown'}`);
   const postId = (row as { id: string }).id;
 
+  // THE TRACKING TAG. A link the operator put in the post gains this post's own src, so an inquiry
+  // that arrives through it resolves to the post rather than to a guess (reAttributionCore). It
+  // happens here, before the version is written, so the approved text and the published text are
+  // the same text — tag and all. An absent or already-tagged link changes nothing.
+  let finalText = draft.text.trim();
+  const link = (input.binding?.linkUrl ?? '').trim();
+  if (link && finalText.includes(link)) {
+    finalText = finalText.split(link).join(taggedLink(link, srcForPost(postId)));
+    const recheck = checkDraft({ ...draft, text: finalText }, new Date().toISOString());
+    if (!recheck.ok) {
+      await supabase.from('social_posts').update({ status: 'canceled', error: 'tagged link made the post unsendable' }).eq('id', postId);
+      throw new Error(recheck.reason ?? 'Adding the tracking link made this unsendable.');
+    }
+    warnings.push(...recheck.warnings.filter((w) => !warnings.includes(w)));
+    await supabase.from('social_posts').update({ body: finalText }).eq('id', postId);
+  }
+
   const content: PostVersionContent = {
-    body: draft.text.trim(),
+    body: finalText,
     platforms: draft.platforms,
     mediaUrls: draft.mediaUrls ?? [],
     mediaDigests: bind.mediaDigests ?? {},
@@ -146,7 +169,7 @@ export async function queueSocialPost(input: {
     worldId: input.worldId ?? null,
     kind: 'publish_post',
     title: `Post to ${names}${when}`,
-    preview: `${draft.text.slice(0, 400)}${draft.text.length > 400 ? '…' : ''}`,
+    preview: `${finalText.slice(0, 400)}${finalText.length > 400 ? '…' : ''}`,
     payload: { ...boundPayload(postId, versionId, contentHash) },
   });
   await supabase.from('social_posts').update({ approval_id: approvalId }).eq('id', postId);
