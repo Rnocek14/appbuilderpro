@@ -25,6 +25,11 @@ export const NAV_SECTIONS: NavSection[] = [
     // THE CORE LOOP — what you touch every day. Keep this to ~5 items.
     title: 'Core',
     items: [
+      // The one door a brand-new owner needs. It was the survey's first finding: three keys decided
+      // whether anything worked and no screen accepted any of them, so the first real button was a
+      // dead end. Start here finishes all five setup steps in one place — it sits first because
+      // nothing below it works until it is done.
+      { to: '/garvis/start', label: 'Start here', icon: KeyRound },
       { to: '/garvis/command', label: 'Home', icon: Sparkles },
       // The content-channel daily loop: every growth world, its channels, and the one-click start.
       { to: '/garvis/channels', label: 'Channels', icon: Film },

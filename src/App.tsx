@@ -18,6 +18,7 @@ const Garvis = lazy(() => import('./pages/Garvis'));
 const Marketing = lazy(() => import('./pages/Marketing'));
 const Missions = lazy(() => import('./pages/Missions'));
 const Command = lazy(() => import('./pages/Command'));
+const Start = lazy(() => import('./pages/Start'));
 const Mind = lazy(() => import('./pages/Mind'));
 const Memory = lazy(() => import('./pages/Memory'));
 const Opportunities = lazy(() => import('./pages/Opportunities'));
@@ -112,6 +113,7 @@ function AppRoutes() {
               stage never remounts as you branch; the params ARE the path (Back walks up, deep-links work). */}
           <Route path="/garvis/home/:businessId?/:areaSlug?" element={<Protected><ProfileHome /></Protected>} />
           <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
+          <Route path="/garvis/start" element={<Protected><Start /></Protected>} />
           {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
           <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
           <Route path="/garvis/mind" element={<Protected><Mind /></Protected>} />

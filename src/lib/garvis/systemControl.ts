@@ -32,6 +32,37 @@ export async function fetchSystemStatus(): Promise<SystemStatus> {
   return data as SystemStatus;
 }
 
+/** Set one edge secret from inside the app. Needs the owner's Supabase connection (one paste, in
+ *  Settings \u2192 Connections) \u2014 after that every other key is a field on the Setup page instead of a
+ *  terminal command. The value goes straight to Supabase and is never stored or logged here. */
+export async function setSecret(name: string, value: string): Promise<{ note: string }> {
+  const { data, error } = await supabase.functions.invoke('system-control', {
+    body: { action: 'set', name, value },
+  });
+  if (error) throw new Error('system-control is not deployed \u2014 run: supabase functions deploy system-control');
+  if (data?.needs === 'supabase_connection') throw new Error(data.error);
+  if (data?.error) throw new Error(data.error);
+  return { note: String((data as { note?: string })?.note ?? 'Saved.') };
+}
+
+/** Is the owner's Supabase account connected? Everything on the Setup page depends on this one fact. */
+export async function supabaseConnected(): Promise<boolean> {
+  const { data, error } = await supabase.functions.invoke('connections', { body: { action: 'list' } });
+  if (error) return false;
+  const rows = (data as { connections?: { provider: string }[] } | null)?.connections ?? [];
+  return rows.some((c) => c.provider === 'supabase');
+}
+
+/** Connect Supabase with a personal access token \u2014 the ONE paste that unlocks the rest. */
+export async function connectSupabase(token: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('connections', {
+    body: { action: 'connect', provider: 'supabase', token },
+  });
+  if (error) throw new Error('The connections function is not deployed.');
+  if (data?.error) throw new Error(data.error);
+  return String((data as { label?: string })?.label ?? 'Connected');
+}
+
 export async function armHeartbeat(functionsBase: string, workerSecret: string): Promise<string> {
   const { data, error } = await supabase.functions.invoke('system-control', {
     body: { action: 'arm', functionsBase, workerSecret },

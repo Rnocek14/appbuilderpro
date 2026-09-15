@@ -11,6 +11,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { cn, timeAgo } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { loadProspects, setProspectStatus, type Prospect } from '../lib/garvis/prospects/prospectsRun';
+import { buildDemoForReview } from '../lib/garvis/prospects/reviewSend';
 import { STAGE_LADDER, STAGE_META, stageRollup, canBuildAndSend, signalChips, type ProspectStage } from '../lib/garvis/prospects/stage';
 import { ProspectDrawer } from '../components/prospects/ProspectDrawer';
 
@@ -63,17 +64,22 @@ export default function Leads() {
     await load();
   };
 
-  // ONE CLICK = a real site + a real pitch, out the door. The button hands the prospect to the
-  // standing-worker, which scrapes their site, builds the demo, and — because we asked to send —
-  // approves and fires the email now (send-email still enforces every safety gate). ~30-60s.
-  const buildAndSend = async (id: string) => {
+  // BUILD, THEN LET A HUMAN READ IT. This row action used to build the demo AND fire a real cold
+  // email to a real business in the same press — it minted the approval and approved it itself, while
+  // the reviewable path was hidden behind clicking the business's NAME instead of the button beside
+  // it. Two buttons an inch apart, one of them irreversible, and the rest of the app promising that
+  // nothing sends without your OK. Now the row builds and QUEUES; sending happens in the drawer,
+  // after the operator has read the actual email.
+  const buildForReview = async (id: string) => {
     setSends((s) => ({ ...s, [id]: { phase: 'sending' } }));
     try {
-      const { data, error } = await supabase.functions.invoke('standing-worker', { body: { pitch_lead_id: id } });
-      const d = data as { ok?: boolean; sent?: boolean; error?: string } | null;
-      if (error || !d?.ok) setSends((s) => ({ ...s, [id]: { phase: 'error', msg: d?.error ?? 'Build failed — try again.' } }));
-      else if (d.sent === false) setSends((s) => ({ ...s, [id]: { phase: 'sent', note: d.error ?? 'Demo built — no email found to send to.' } }));
-      else setSends((s) => ({ ...s, [id]: { phase: 'sent' } }));
+      const r = await buildDemoForReview(id);
+      if (!r.ok) setSends((s) => ({ ...s, [id]: { phase: 'error', msg: r.error ?? 'Build failed — try again.' } }));
+      else if (!r.built) setSends((s) => ({ ...s, [id]: { phase: 'sent', note: r.error ?? 'Demo built — no public email found for this business.' } }));
+      else {
+        setSends((s) => ({ ...s, [id]: { phase: 'sent', note: 'Ready to read' } }));
+        setSelectedId(id);   // open the drawer on the pitch, so reviewing is the path of least resistance
+      }
     } catch (e) {
       setSends((s) => ({ ...s, [id]: { phase: 'error', msg: e instanceof Error ? e.message : 'Build failed.' } }));
     }
@@ -233,12 +239,12 @@ export default function Leads() {
                 {/* Quick action lives on the row for the buildable stages; everything else opens the drawer. */}
                 {canBuild ? (
                   send?.phase === 'sent' && !send.note ? (
-                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-forge-ok/40 px-3 py-2 text-xs font-semibold text-forge-ok"><Check size={14} /> Sent</span>
+                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-forge-ok/40 px-3 py-2 text-xs font-semibold text-forge-ok"><Check size={14} /> Ready to read</span>
                   ) : (
-                    <button onClick={(e) => { e.stopPropagation(); void buildAndSend(r.id); }} disabled={send?.phase === 'sending'}
-                      title="Build a demo site and email the pitch now"
+                    <button onClick={(e) => { e.stopPropagation(); void buildForReview(r.id); }} disabled={send?.phase === 'sending'}
+                      title="Build their demo site and write the pitch — you read it before anything sends"
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-forge-ember px-3 py-2 text-xs font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-60">
-                      {send?.phase === 'sending' ? <><Loader2 size={14} className="animate-spin" /> Building…</> : <><Send size={14} /> {r.previewSlug ? 'Send again' : 'Build & send'}</>}
+                      {send?.phase === 'sending' ? <><Loader2 size={14} className="animate-spin" /> Building…</> : <><Send size={14} /> {r.previewSlug ? 'Rebuild' : 'Build the pitch'}</>}
                     </button>
                   )
                 ) : (
