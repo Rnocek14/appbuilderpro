@@ -40,7 +40,8 @@ AI-disclosure gate, and per-brand destination mapping. That is months of the har
 and already reasoned about in its own comments.
 
 **What is missing is not the rail — it is what rides on it.** Five structural gaps stand between
-the current code and the plan's first milestone:
+the current code and the plan's first milestone (a second pass added several smaller ones, all
+recorded in §2):
 
 | # | Gap | Why it blocks the milestone |
 |---|---|---|
@@ -52,6 +53,17 @@ the current code and the plan's first milestone:
 
 All five are small, additive, and fixable inside the existing spine. None requires a new
 application, a new CRM, an MLS engine, or a client portal.
+
+**And the fix for gap 1 does not need inventing — this repo already built it once.** The
+`content_week` approval carries a `pieces_hash` in its payload, and the drain re-hashes the current
+content before executing (`standing-worker/index.ts:721-733`):
+
+```ts
+if ((await hashPayload(wk.pieces)) !== wkPayload.pieces_hash) {
+  // The content changed AFTER the decision — the decision no longer covers it. Refuse.
+```
+
+Phase 1's job is to give `publish_post` the same treatment the content week already has.
 
 ---
 
@@ -72,9 +84,12 @@ built. **AVOID** — exists, but do not pull it into this workspace.
 | `src/components/garvis/SocialPublisher.tsx`, `AyrshareDestinations.tsx`, `canvas/SocialBoard.tsx` | Composer + destination UI inside the general studio. | **EXTEND** (a simpler surface reuses the logic, not the layout) |
 
 **The finding that matters:** a post's content is **mutated in place**. `social_posts` is a single
-live row; there is no version table for post content anywhere in the schema. The closest existing
-immutable-version primitive is `public.artifact_versions` (`app_0026_cluster_studio.sql`) with its
-`snapshot_artifact_version()` BEFORE UPDATE trigger — that is the precedent to copy.
+live row; there is no content-version table and no `content_hash` column anywhere in the schema
+(`grep` finds none). `public.artifact_versions` (`app_0026_cluster_studio.sql`) with its
+`snapshot_artifact_version()` BEFORE UPDATE trigger is the nearest *shape*, but it is **not
+immutable** — its policy is `for all using (owner_id = auth.uid())`, so the owner can update or
+delete a snapshot. Its own migration calls it "snapshot-on-update history", not a ledger. A Phase 1
+version table must therefore grant **SELECT + INSERT only**, and must not copy that policy.
 
 ### 2.2 The approval spine — and the binding gap
 
@@ -106,9 +121,24 @@ says so itself, in `social-publish/index.ts`:
 
 > `// The approval payload is only { post_row_id }, so the payload hash alone can't protect body/media — this re-derivation from the DB is the binding`
 
-That comment is about the AI-disclosure gate, which *is* re-derived server-side. Text, destinations
-and timing are not. **This is the one structural change Phase 1 must make**, and the plan names it
-correctly.
+That comment is about the AI-disclosure gate, which *is* re-derived server-side. In fact three
+gates re-read the row — `checkDraft()`, the disclosure gate, and the per-world Profile-Key
+destination gate — but **none of them compares the row against what the human approved.** They are
+validity and policy gates, not content binding. **This is the one structural change Phase 1 must
+make**, and the plan names it correctly.
+
+Two further properties of the spine that Phase 1 must handle deliberately:
+
+- **The hash check is null-grandfathered.** `payloadHash.ts`: `if (!storedHash) return true;`. An
+  approval minted without a hash skips verification entirely. A new `content_hash` must be
+  **required** for `publish_post` on the new rail, or the binding is opt-out by omission.
+- **There is already a machine path that mints pre-approved `publish_post` approvals.** The
+  content-week drain inserts them with `status: 'approved', requested_by: 'garvis-auto',
+  decided_via: 'content_week'` (`standing-worker/index.ts:767-771`), and `social-publish`
+  deliberately accepts them (its comment: "status='approved' IS the human authority for either
+  class"). For a general marketing tool that is a considered trade. For Gina's accounts it is not:
+  **no post in this workspace may publish on an approval no human decided.** Phase 1 scopes the new
+  rail so auto-minted approvals cannot ride it, and says so in a verify suite.
 
 ### 2.3 Ayrshare publishing
 
@@ -142,7 +172,11 @@ Two additive fixes needed (both in §4):
 2. **A thrown fetch (timeout) escapes to the outer `catch`**, which returns `500` — *without*
    releasing the claim and *without* touching `social_posts.status`. That is fail-safe against
    duplicates (good) but leaves the post permanently `queued`-and-claimed with no reconciliation
-   (bad). The plan's requirement — "a timeout needs reconciliation before any retry that might
+   (bad). **And it is worse than "stuck":** the 30-second abort can fire *after* Ayrshare accepted
+   the post, so the post can be live on the platform while our row says `queued` with no
+   `provider_post_id` — and `social-sync` only looks at rows that *have* a `provider_post_id`, so it
+   is never noticed, never reconciled and never measured. There is also no `in_flight`/`publishing`
+   status in the check constraint, so such a row is indistinguishable from a fresh one. The plan's requirement — "a timeout needs reconciliation before any retry that might
    create a duplicate" — is exactly right and currently unmet.
 
    Worth knowing: `send_claimed_at` appears in `social-publish`, `send-email`, `send-sms` and
@@ -150,6 +184,16 @@ Two additive fixes needed (both in §4):
    not a social-only bug. Phase 1 should build the reconciler for social in a shape that generalises
    (a small shared core + one table-agnostic claim record), so email, SMS and e-sign can adopt it
    later without a second design.
+
+Two smaller properties worth knowing before touching this file:
+
+- **A late post dies rather than slips — permanently.** Past the one-hour grace, `checkDraft`
+  refuses and `block()` sets `status: 'failed'`. A worker outage longer than an hour kills every
+  post scheduled inside it, and nothing re-queues them. That is the honest choice over publishing a
+  day late, but Phase 1 should surface those as a Queue item rather than a silent failed row.
+- **`approvals.result` is written read-modify-write over the whole jsonb column** (`priorResult` is
+  snapshotted, then re-spread at every later write). Any concurrent writer's additions are
+  clobbered. If Phase 1 stores anything else there, use a jsonb merge or a separate column.
 
 **Swapping providers** (Upload-Post, per the plan's §11) is a contained change: `AYRSHARE_URL`, the
 `Authorization`/`Profile-Key` headers, `providerPayload()` and `mapProviderResult()`. The last two
@@ -186,8 +230,23 @@ service-role writes. Plan-gating is handled honestly: a 402/403 sets `available:
 A `scheduled` post is reconciled to `posted` **only on evidence** (analytics actually came back) —
 the comment is explicit that a 2xx envelope "proves nothing about the post being live".
 
+Two corrections to the happy picture, both found on a second read:
+
+- `last_synced_at` is stamped on the 2xx path and on the plan-gated 402/403 path — **but not on any
+  other non-2xx (404/429/5xx) nor on a thrown fetch.** Those rows stay inside the
+  `last_synced_at.is.null` selector and are re-fetched on every 6-hour tick indefinitely.
+- Coverage is deliberately bounded: `MAX_POSTS_PER_OWNER = 20`, `STALE_AFTER_MS = 6h`,
+  `WINDOW_MS = 30 days`. Fine for one realtor; worth knowing before anyone reads a number as
+  complete.
+
 **EXTEND:** add the platform URL (`post_url`) to what is captured and displayed. This is the single
 column that turns "we think it went out" into "here it is".
+
+**A plan consequence that matters for the acceptance test:** because the `scheduled → posted`
+reconciliation requires analytics to come back, on a plan without analytics a *provider-scheduled*
+post is never confirmed posted and never gets metrics. On that plan the honest way to prove
+publication is to post immediately rather than schedule provider-side, or to read the provider's
+history endpoint — not to wait for a status that cannot arrive.
 
 ### 2.6 Assets, media and provenance
 
@@ -248,7 +307,27 @@ in the drain — cheap, and it turns a silent overnight failure into a morning Q
 
 The comment in `app_0036` states the consent rule that must be preserved verbatim: a lead
 "consented to be answered, so the edge fn links (or creates) a contact — **NEVER modifying an
-existing contact's `email_status`** (suppression is sacred)."
+existing contact's `email_status`** (suppression is sacred)." The implementation
+(`supabase/functions/_shared/leadIntake.ts`) honours it: select-first, insert-only, no UPDATE path.
+
+Four second-pass corrections that change what Phase 1 must do:
+
+1. **A phone-only inquiry cannot be recorded today.** `leads.email` is `not null` and
+   `captureLead()` refuses anything failing its `EMAIL_RE`. For a realtor — where the highest-intent
+   inquiry is a phone call — that is a hole, not a detail. Phase 1 needs
+   `alter column email drop not null` plus a `check (email is not null or phone is not null)`.
+   (Loosening a `not null` on this table has precedent: `app_0138` did exactly that for `world_id`.)
+2. **`leads` has grown since `app_0036`:** `first_touch_at` (`app_0044`), `preview_site_id`
+   (`app_0138`), and `world_id` is **no longer** `not null`. The only inserts anywhere are in
+   `_shared/leadIntake.ts`, called from `site-events` and `claim-submit`.
+3. **`contacts` is not the only person store.** `public.mail_recipients` (`app_0063_farm.sql`) is a
+   parallel address-first store with its own suppression table `public.do_not_mail`. Direct mail in
+   Phase 2 will meet it; Phase 1 should not quietly create a third.
+4. **Contact dedupe is convention, not constraint.** `uq_contacts_owner_email` is on raw
+   `(owner_id, email)` with no `lower()`; every caller lowercases by hand. And the lead engine is
+   *not* a separate namespace after all — `le_customers.contact_id` foreign-keys `public.contacts`
+   and `lead-ingest` writes `contacts` directly. It shares the person, campaign and invoice spines;
+   only its event/lead/outcome tables are its own.
 
 **Recommendation: no new CRM, no new contact table.** An Abbey Springs inquiry lands in
 `public.leads` with its `contact_id`, exactly as a website lead does today. Phase 1 adds
@@ -258,8 +337,18 @@ marketing-originated inquiries and does not pretend to be her book of business.
 
 ### 2.9 Facts, sources and the honesty spine
 
-**There is no facts table.** Nothing in `supabase/migrations/` stores a claim with a source URL and
-a review date. The nearest things:
+**No table pairs a claim with a source URL *and* a review date.** That is the precise gap — the
+looser statement "there is no facts table" would be wrong, and the near-misses matter:
+
+- **`public.garvis_knowledge` (`app_0005`) is closer than anything else**: its own header says
+  "Every row is a SOURCED ASSERTION (claim + source + confidence)", with `body` (the assertion),
+  `source` (**free text, not a URL**), `confidence`, and `approved_at` — a human approval gate
+  already. What it lacks is a source URL, a re-review date, and community scoping.
+- The `needsReview` flag pattern is already implemented twice (`factChannel.ts`: "No sources came
+  back — the claims are UNVERIFIED"), and surfaced in the Fact Channel Studio UI. That is the
+  cheapest honest primitive to reuse for an unsourced community fact.
+
+The other near-misses:
 
 - `src/lib/garvis/factChannel.ts` — `FactSource { claim, url, note }` and `needsReview`, but these
   live *inside a script JSON blob*, persisted as part of `channel_episodes.script`. They cannot be
@@ -274,7 +363,13 @@ The honesty spine that **does** exist and must be extended rather than duplicate
 - `checkDraft()` — refuses what a platform would reject, warns where it would truncate.
 - `disclosureGate()` — fail-closed AI labelling, re-derived server-side.
 - `src/lib/garvis/automationCards.verify.ts` — bans persona language and hours-saved claims in CI.
-  **This is the pattern**: an honesty rule becomes a verify suite, not a code comment.
+  It lints a hand-written static array, so it is the *weaker* form of the pattern.
+- **`src/lib/preview/bespokeSite.ts` → `bespokeHonest(html, profile): HonestyResult` is the stronger
+  precedent, and the one Phase 1 should copy**: a deterministic runtime gate over *generated* output
+  that rejects invented credentials, invented licence numbers, invented tenure, invented star
+  ratings and invented warranties, with a verify suite asserting each refusal. Its comment states
+  the disposition exactly: "it fails toward safety … a lie never reaches a real business." A fact
+  gate over generated real-estate copy is the same function with a different grounding set.
 - `invokeFailure` — named, actionable failure messages instead of raw plumbing errors.
 
 And the counter-example the plan flagged, confirmed at the exact line:
@@ -283,12 +378,20 @@ And the counter-example the plan flagged, confirmed at the exact line:
 src/lib/garvis/campaignCore.ts:306:      body: `Another happy seller${b.area ? ` in ${b.area}` : ''}. ${highlight}`,
 ```
 
+One correction to how this is usually described: it is **not a fallback default**. It is the
+unconditional body for *every* `just_sold` campaign — only `highlight` degrades to an `EDIT(…)`
+hole. Two more in the same file: `'The right marketing brought the right buyer.'` (:309) and
+`'Move-in ready.'` (:330).
+
 `campaignCore.ts` is otherwise scrupulous — its header states "Every number (price, beds, baths) is
-a STRING the operator typed — never computed, never invented" and missing facts become visible
-`[EDIT: …]` holes. But `"Another happy seller"` asserts a client's emotional state that nobody
-verified. `src/lib/garvis/socialStudio.ts` has the same shape (`"Nothing means more than a happy
-client"`, `"Another happy [EDIT: seller/buyer]!"`). These are template defaults, not generated lies,
-and the fix is small — but they must not ride into Gina's real accounts.
+a STRING the operator typed — never computed, never invented". And `socialStudio.ts` deserves a
+correction too: it does **not** contain invented testimonials. Every testimonial slot is an explicit
+hole (`"[EDIT: a real testimonial]"`) and the card itself says *"Only ever use real reviews."* What
+it shares with `campaignCore` is the unverifiable *sentiment framing around* the holes
+(`"Another happy [EDIT: seller/buyer]!"`, `"Nothing means more than a happy client."`).
+
+So the fix is narrow and worth stating precisely: remove the unverifiable sentiment, keep the holes.
+Nobody wrote a lie here; they wrote a sentence that assumes a feeling nobody checked.
 
 ### 2.10 Campaigns
 
@@ -298,6 +401,20 @@ and the fix is small — but they must not ride into Gina's real accounts.
 | `public.marketing_campaigns` / `public.marketing_assets` (`app_0010_garvis_marketing.sql`) | Live, read by `src/hooks/useMarketing.ts` on `/garvis/marketing`. `subject` literally documents "mom's real-estate business". **But:** `marketing_assets.status` (`draft/approved/scheduled/published`) is a *second* approval lifecycle that does not go through `approvals`. | **EXTEND** — with the explicit rule that the approval of record is the `approvals` row, never `marketing_assets.status` |
 | `src/lib/garvis/workweb.ts` → `MOM_REAL_ESTATE_TEMPLATE`, `workwebRun.ts` → `instantiateWeb('mom-real-estate')` | Deterministic seeding of the whole "Mom's Real Estate Marketing" venture (campaigns, mail, social, video, pages, contacts), zero AI. Surfaced by `QuickStartRealEstate.tsx`. | **REUSE** as the world seed |
 | `FarmPanel.tsx`, `MailerDesigner.tsx`, `Postcard.tsx`, `MarketDataPanel.tsx` | Farm/mailer/market surfaces. | **DEFER** to Phase 2 (mail is a funded, physical step; it should not gate the software milestone) |
+| `supabase/migrations/app_0066_mls.sql` → `public.mls_listings` | **An MLS rail already exists**: a RESO Web API feed with credentials sealed in `provider_connections`, market stats *computed* from real rows, "No feed configured = honest empty state, never sample data." | **REUSE** if a feed is ever configured — and **do not build another** |
+
+Two structural facts about campaigns:
+
+- **`campaignCore.ts` is pure and unpersisted.** Its only consumers are UI components; nothing
+  writes its output to a table. A composed campaign piece has **no database home** between
+  composition and `social_posts.body` — which is precisely the mutable window the version table
+  closes.
+- **There are three parallel "campaign" namespaces already**: `marketing_campaigns` /
+  `marketing_assets` (`app_0010`), `outreach_campaigns` (`app_0023`, per-contact cold email), and
+  `growth_channels` / `channel_episodes` (`app_0123`) plus `content_weeks` (`app_0088`). Phase 1
+  must pick one and say so rather than quietly adding a fourth — hence extending
+  `marketing_campaigns` (§3.3), which is the one the existing `/garvis/marketing` page already
+  reads.
 
 ### 2.11 Money, spend and outcomes
 
@@ -307,7 +424,28 @@ and the fix is small — but they must not ride into Gina's real accounts.
 | `ad_spends`, `ad_metrics`, `ads-sync`, `ads-watch` | Paid-ads spend and metrics. | **DEFER** (Phase 1 runs no paid campaign) |
 | `invoices`, `stripe-webhook`, `create-checkout`, `app_0047_money_loop.sql` | Agency billing — money *in*, from clients. | **AVOID** for this workspace |
 | Marketing expenses (postage, print, production) | — | **NEW** (and deliberately Phase 1b, §5.3) |
-| Business outcomes (appointment, listing signed, closed) | `public.timelines` (`app_0067`) has `kind in ('listing','purchase')` — a transaction timeline, not an attributed outcome | **NEW** |
+| Business outcomes (appointment, listing signed, closed) | `public.timelines` (`app_0067`) has `kind in ('listing','purchase')` — a transaction timeline, not an attributed outcome. `public.appointments` (`app_0109`) is real and fully wired, but stores `customer_name/email/phone` with **no `contact_id` and no `lead_id`**, so a booked meeting never joins the CRM | **NEW** (and `appointments` wants a `lead_id`) |
+| `app_0086_invoice_provenance.sql` | **The precedent for outcome attribution already exists on the money side**: `invoices.source`, `invoices.lead_id → leads`, `invoices.campaign_id → outreach_campaigns`. "REVENUE KNOWS WHERE IT CAME FROM." | **REUSE the pattern** |
+
+Note what this implies: the house has already solved "which campaign earned this" — for invoices.
+Phase 1's `re_outcomes` is the same idea one step earlier in the funnel, and should look like
+`app_0086`, not like something new. **With one caveat: `invoices.lead_id` has zero call sites.** The
+column was added for exactly this purpose and never wired. That is a warning, not a discouragement —
+a provenance column nobody writes is decoration, so Phase 1's outcome writes must be part of the
+operator's actual flow, not an optional field.
+
+Three more dead-column findings in the same area, all of which argue for keeping Phase 1b small and
+real: `ad_spends.period_start` / `period_end` have **zero writers and zero readers**;
+`mail_batches.cost_usd` is accepted by `logMailBatch` and passed by **none** of its three callers;
+and the weekly scorecard's "Ad spend" line reads `ad_metrics` only, so the operator's own manually
+logged spend never appears in the review the product asks them to do.
+
+And one live bug worth fixing whenever results are next touched: `src/lib/garvis/resultsRun.ts:39`
+caps its leads query at `.limit(50)` and then uses `leads.length` as the world's total lead count —
+past 50 leads every headline count and every cost-per-lead figure is understated. Meanwhile `leads` itself carries no `campaign_id`, no post
+reference and no UTM columns (`grep utm` over the migrations returns nothing), and only two tables
+in the entire schema reference `social_posts` at all (`social_post_metrics.post_id`,
+`channel_episodes.post_id`) — so **the last two legs of the Phase 1 chain have no schema today.**
 
 ### 2.12 Existing UI surfaces and where a focused workspace fits
 
@@ -315,6 +453,17 @@ Routes (from `src/App.tsx`): `/garvis/home/:businessId?/:areaSlug?` (ProfileHome
 moment), `/garvis/queue` (the Queue), `/garvis/marketing`, `/garvis/webs` and
 `/garvis/webs/:worldId` (WorkWebs / WorkWeb — the per-venture studios), `/garvis/leads`,
 `/garvis/contacts`, `/garvis/channels`, `/garvis/money`, plus ~40 more.
+
+Two naming traps that will mislead anyone reading this map:
+
+- **`src/pages/Leads.tsx` is not about Gina's leads.** It is the agency's own B2B prospect board
+  (scraped businesses to sell websites to), and `navConfig.ts` even labels it *Prospects*. A
+  realtor's actual inquiries — `public.leads` — have **no page at all** today.
+- **`/garvis/marketing` is registered in `App.tsx` and listed in `navConfig.ts` nowhere.** It is a
+  live route with no way to reach it, carrying a whole second campaign model
+  (`marketing_campaigns` + `marketing_assets`). Extending that table (§3.3) is still right — it is
+  the only campaign table with the right semantics — but nobody should assume the page behind it is
+  in use.
 
 A **world** (`public.knowledge_worlds`, `app_0013`) is the tenant/brand scope: campaigns, posts,
 documents, leads, site channels and execution runs all carry `world_id`, and `app_0114_world_spine`
@@ -325,7 +474,30 @@ CLAUDE.md's simplicity-doctrine reference implementations (Home, Queue, Prospect
 page, Fact Channel Studio) are the layout precedent: work first, chrome collapsed; one orange
 primary action; something useful on screen before the operator types anything.
 
-### 2.13 An assistant-independent action layer
+### 2.13 The adjacent rails — email, booking, print, automation
+
+The plan's operation is not only social, and a reviewer looking at the publishing rail will miss
+these. All four are real, not stubs:
+
+| Rail | State | Verdict |
+|---|---|---|
+| **Email** — `supabase/functions/send-email/index.ts` | The most production-ready path in the repo: approval + payload-hash tamper check, atomic double-send claim, kill switch, CAN-SPAM physical address enforced, sender-domain verification, fail-closed suppression, and a **timezone-anchored daily cap with warmup** (`const tz = settings.timezone \|\| 'America/Chicago'`). | **REUSE untouched** — and copy its timezone anchoring for scheduling (§3.2) |
+| **Booking** — `booking` edge function, `app_0109_booking.sql`, `BookingSetup.tsx` | Fully real end to end: public booking, a DB-level `gist` anti-double-book constraint, confirmations, and a reminder drain in `standing-worker`. | **REUSE** — with two fixes: `appointments` has no `lead_id`, and `BookingSetup.tsx` hardcodes DST-era offsets (`Central (UTC−5)`), so slots shown to a customer are an hour wrong for half the year |
+| **Print / mail** — `FarmPanel.tsx` `MergeRun` | The *real* per-recipient print run is here, not in `MailerDesigner.tsx`: true `9.25in × 6.25in` pages, USPS address block, fail-closed `partitionMailable` suppression, logged as a `mail_batches` row pinned to a territory. | **DEFER to Phase 2**, but know where it is |
+| **Automation** — `app_0076_automation_triggers.sql` | The runner exists and fires on the heartbeat (the migration's own header understates it). But it keys to `customers` inside `customer_lists` — **a third people-model, disjoint from both `contacts` and `mail_recipients`.** | **AVOID** for Phase 1 |
+
+Two findings here that bear directly on a brokerage:
+
+- **The compliance line is rendered only on the postcard back.** `brand_kits.compliance_line`
+  reaches printed mail (`FarmPanel.tsx:396`, `Postcard.tsx:176`) and is passed to the chat prompts
+  as *context* (`clusterChat.ts:144`) — but it is never rendered into a social caption or an email
+  body, and nothing blocks a send when it is missing — unlike CAN-SPAM's physical address, which `send-email` does enforce. For licensed
+  real estate that is the wrong way round. Phase 1 adds the brokerage line to the publish gate.
+- **Per-drop attribution was designed and never built.** `mail_batches.batch_token` exists in
+  `app_0063_farm.sql:79` with a comment explaining exactly what it enables — and has **zero**
+  references anywhere in the repo. Every postcard QR therefore carries the generic `?src=postcard`.
+
+### 2.14 An assistant-independent action layer
 
 `src/lib/garvis/actionCatalog.ts` already defines `ACTION_SPECS` — id, title, category, `risk`,
 description, typed `params`, and what each action `produces` — split deliberately from
@@ -337,7 +509,7 @@ That is the seam an MCP server plugs into later. Phase 1 does **not** build the 
 builds every new operation *as a named action with typed params* so that exposing it over MCP or
 HTTP later is an adapter, not a rewrite (§4.6).
 
-### 2.14 Database conventions and CI
+### 2.15 Database conventions and CI
 
 - Migrations: `supabase/migrations/app_01XX_*.sql`, additive and idempotent
   (`create table if not exists`, `add column if not exists`, `drop policy if exists` then
@@ -369,25 +541,42 @@ HTTP later is an adapter, not a rewrite (§4.6).
 
 Until that chain holds end to end, on one campaign, with one community, nothing else gets built.
 
-### 3.2 The five design decisions
+### 3.2 The six design decisions
 
 1. **The approval binds to an immutable version, and the publisher reads only that version.**
    `social_posts` becomes a header (identity, live status, provider results). The content of record
-   moves to `post_versions`, which is insert-only by RLS. Editing an approved post creates v2 and
-   *invalidates the approval* — the operator must approve again. This is the plan's requirement
-   ("changing its text, destination, media or timing should require the appropriate renewed
-   approval") expressed as a schema constraint rather than a convention.
+   moves to `post_versions`, whose RLS grants **SELECT + INSERT only** — deliberately *not* the
+   `for all` policy `artifact_versions` uses, which is why that table is history rather than a
+   ledger. Editing an approved post creates v2 and *invalidates the approval*. This is the plan's
+   requirement ("changing its text, destination, media or timing should require the appropriate
+   renewed approval") expressed as a schema constraint rather than a convention.
+
+   **Copy the house's own implementation.** The content-week rail already does this with
+   `pieces_hash` (`standing-worker/index.ts:721-733`): the payload carries a hash of the content and
+   the executor re-hashes before acting, cancelling with a named `mind_events` note on mismatch.
+   Phase 1 is that pattern applied to `publish_post`, with a version row behind it.
 2. **No new approval kind.** `publish_post` stays. The payload gains `version_id` + `content_hash`;
-   the existing `payload_hash` machinery then protects the whole thing for free. Old approvals with
-   no `version_id` keep working exactly as today — the same null-grandfathering `app_0069` used.
+   the existing `payload_hash` machinery then protects the whole thing for free. **But
+   `content_hash` is required on this rail, not grandfathered** — `payloadMatches()` returns `true`
+   for a null hash, so an optional binding is no binding. A `publish_post` approval scoped to this
+   workspace with no `content_hash` must be refused, and one minted with
+   `requested_by='garvis-auto'` must be refused outright (§2.2). Existing posts elsewhere in the app
+   keep today's behaviour untouched.
 3. **A fact without a source and a review date cannot appear in published copy.** Enforced in a pure
    core, in CI, *and* server-side at publish time — the same three-layer shape the disclosure gate
    already uses. A missing fact renders a visible hole and blocks queueing; it never becomes a
    confident sentence.
 4. **America/Chicago is stored, not inferred.** A version records both the instant (`scheduled_for
    timestamptz`) and the operator's intent (`scheduled_local text` + `schedule_tz text`). DST is a
-   test case, not a hope.
-5. **Every new operation is a named action with typed params.** The UI calls the action; later an
+   test case, not a hope. The precedent to copy is `send-email`, which already anchors its daily cap
+   to `outreach_settings.timezone` — and the anti-precedent is `BookingSetup.tsx`, which hardcodes
+   `Central (UTC−5)` and is therefore wrong for half the year (§2.13).
+5. **The brokerage line publishes with the post, or the post does not publish.**
+   `brand_kits.compliance_line` currently reaches only the printed postcard back (§2.13). For a
+   licensed agent the caption and the email body are exactly where it is required. This is one more
+   server-side refusal in the same place the disclosure gate already lives, and it costs almost
+   nothing.
+6. **Every new operation is a named action with typed params.** The UI calls the action; later an
    MCP/HTTP adapter calls the same action. The action layer can draft, schedule, read and report —
    **it can never approve.** Approval stays a human act in the Queue.
 
@@ -448,8 +637,10 @@ alter table public.social_posts
   add column if not exists current_version_id uuid references public.post_versions(id),
   add column if not exists campaign_id uuid references public.marketing_campaigns(id),
   add column if not exists post_urls jsonb,        -- { instagram: 'https://…', facebook: '…' }
-  add column if not exists claimed_at timestamptz; -- timeout reconciliation
--- status check extended additively with 'in_flight'
+  add column if not exists claimed_at timestamptz,        -- timeout reconciliation
+  add column if not exists idempotency_key text;          -- sent to the provider; the reconcile key
+-- status check extended additively with 'in_flight' (today's constraint has no sending state at all,
+-- which is why a timed-out row is indistinguishable from a fresh one)
 alter table public.social_post_metrics add column if not exists post_url text;
 ```
 
@@ -463,6 +654,11 @@ alter table public.marketing_campaigns
   add column if not exists owner_name text,        -- the named human who answers it
   add column if not exists starts_on date, add column if not exists ends_on date;
 
+-- A realtor's highest-intent inquiry is a phone call, and leads.email is currently not null (§2.8).
+alter table public.leads alter column email drop not null;
+alter table public.leads add constraint leads_email_or_phone
+  check (email is not null or phone is not null) not valid;  -- not valid: existing rows all have email
+
 alter table public.leads
   add column if not exists campaign_id uuid references public.marketing_campaigns(id) on delete set null,
   add column if not exists post_id uuid references public.social_posts(id) on delete set null,
@@ -470,8 +666,13 @@ alter table public.leads
   add column if not exists first_source text, add column if not exists last_source text,
   add column if not exists stated_influence text;  -- what the prospect said, verbatim
 
+-- A booked meeting must be able to become an outcome (app_0109 appointments has no CRM link today).
+alter table public.appointments
+  add column if not exists lead_id uuid references public.leads(id) on delete set null,
+  add column if not exists contact_id uuid references public.contacts(id) on delete set null;
+
 public.re_outcomes
-  id, owner_id, world_id, lead_id, campaign_id,
+  id, owner_id, world_id, lead_id, campaign_id, appointment_id,
   kind text check (kind in ('qualified_conversation','appointment_set','appointment_held',
                             'listing_signed','closed','lost')),
   occurred_on date not null, note text, value_usd numeric,
@@ -482,6 +683,17 @@ public.re_outcomes
 `attribution='unknown'` is a first-class value. The plan is explicit that attribution must be
 allowed to stay unknown, and a system that forces a guess will be lied to.
 
+This table is deliberately shaped like `app_0086_invoice_provenance.sql` ("REVENUE KNOWS WHERE IT
+CAME FROM"), which already links an invoice to its lead and campaign. `re_outcomes` is the same idea
+one step earlier in the funnel — not a new concept.
+
+**Why not extend `garvis_knowledge` instead of adding `re_facts`?** It is genuinely close (claim +
+source + confidence + `approved_at`, §2.9), and the question deserved asking. Three things decide
+against it: its `source` is free text rather than a URL row, it has no re-review date, and it has no
+community scope — so the additive changes would be a new sources table, a new date column and a new
+FK, i.e. the new tables anyway, bolted onto a table full of unrelated rows. The honest move is a
+small purpose-built pair that borrows `garvis_knowledge`'s approval discipline.
+
 ### 3.4 Code — pure cores, verify suites, run layers
 
 New (house pattern: pure `X.ts` + `X.verify.ts` + impure `XRun.ts`):
@@ -490,10 +702,11 @@ New (house pattern: pure `X.ts` + `X.verify.ts` + impure `XRun.ts`):
 |---|---|---|
 | `supabase/functions/_shared/postVersionCore.ts` | `canonicalVersion()`, `versionHash()` (on `stableStringify`/`hashPayload`), `versionsDiffer()` → the named re-approval reason | `verify:postversion` |
 | `supabase/functions/_shared/reScheduleCore.ts` | `localToInstant(local, tz)`, `instantToLocal(iso, tz)`, `describeSchedule()` — DST-correct via `Intl`, the `icsCore.ts` precedent | `verify:reschedule` |
-| `supabase/functions/_shared/reFactsCore.ts` | `isCitable(fact, sources, now)`, `renderWithFacts(template, facts)` → text + `holes[]`, `blockingReason()` | `verify:refacts` |
+| `supabase/functions/_shared/reFactsCore.ts` | `isCitable(fact, sources, now)`, `renderWithFacts(template, facts)` → text + `holes[]`, `blockingReason()` — shaped after `bespokeHonest()` (§2.9): a deterministic gate over *generated* output that fails toward safety | `verify:refacts` |
 | `src/lib/garvis/re/reAttribution.ts` | inquiry → (campaign, post, community) resolution from `?src=` tags and stated influence; never invents a link | `verify:reattribution` |
 | `src/lib/garvis/re/reActions.ts` | `RE_ACTION_SPECS` — the named-action seam (§3.6) | `verify:reactions` |
 | `src/lib/garvis/re/reRun.ts` | impure: draft → version → approval → schedule → cancel → read status | — |
+| `supabase/functions/_shared/publishGate.ts` | the brokerage-compliance refusal, beside the disclosure gate | `verify:publishgate` |
 
 Changed:
 
@@ -570,7 +783,9 @@ the same actions, and neither becomes the database.
 
 ## 4. Explicitly out of scope for Phase 1
 
-- **No MLS engine.** Use the brokerage's authorized search. `mls-sync` stays where it is.
+- **No MLS engine.** One already exists (`app_0066_mls.sql` + `mls-sync`, §2.10) and is the only
+  numbers source the house trusts. Phase 1 neither builds another nor depends on it: if a RESO feed
+  is configured, market copy reads from `mls_listings`; if not, the honest empty state stands.
 - **No client portal**, no public community pages, no lead-capture redesign. Phase 1 uses the
   existing `site_channels` → `site_events` → `leads` ingest that already works.
 - **No second CRM.** `leads` + `contacts` as they stand, plus attribution columns (§3.3).
@@ -602,6 +817,10 @@ pre-flight surfaced on Home, and the weekly results summary.
   `move-in ready` and similar unverifiable claims in every generated default.
 - `verify:reattribution` — a lead with no `?src=` resolves to `attribution='unknown'`, never to the
   most recent campaign.
+- `verify:approvalkinds` — a cheap parity suite asserting every `approval_kind` value has a
+  `KIND_META` entry and vice versa. Nothing enforces this today, and it has already broken once:
+  `app_0112_send_sms_enum.sql` exists because the SMS rail shipped without its enum value and
+  "Every approval insert with kind='send_sms' therefore failed at the DB".
 
 ### 5.2 Hermetic e2e (`e2e/real-estate.authed-mock.spec.ts`)
 
@@ -617,7 +836,11 @@ The nine-step chain against mocked Supabase + mocked Ayrshare, plus the hostile 
 | Provider timeout | `in_flight` + `claimed_at`; **no** retry until reconciliation; an unresolvable case becomes a Queue decision, not a duplicate post |
 | Stale fact at send time | Blocked with the fact named and the review date shown |
 | Media replaced after approval | Digest mismatch blocks the send with a named reason; a new version must be approved |
+| Approval with no `content_hash` | Refused on this rail — the binding is never optional (§3.2) |
+| Auto-minted approval (`requested_by='garvis-auto'`) | Refused on this rail: nothing publishes to Gina's accounts on a decision no human made |
+| Timeout where the provider *did* post | Reconciler finds it by idempotency key / history, records the real status and URL — never a second post |
 | Analytics plan-gated (402/403) | Counts-only, `available:false`, no invented numbers |
+| Missing brokerage compliance line | Refused before the provider call, with the setting named |
 | Past schedule beyond grace | Refused with the honest reason, never posted a day late |
 
 ### 5.3 The live run (the only test that proves anything)
@@ -648,6 +871,9 @@ deliberate cancel and a deliberate failure so the failure paths are seen working
    only and claims nothing more.
 6. **The first ten Abbey Springs facts.** Phase 1 cannot be demonstrated without real, sourced,
    reviewed facts. This is Gina's work and it is the actual bottleneck — not the code.
+7. **The brokerage's required disclosure line**, verbatim, and where it must appear. §2.13 shows it
+   currently reaches printed mail only; Phase 1 puts it on every published caption, and it has to be
+   the line the brokerage actually requires, not an approximation.
 
 ---
 
