@@ -18,6 +18,23 @@
 --
 -- Additive and idempotent, like every migration here.
 
+-- 0. STAND ON OUR OWN. This alters a table app_0127 created, and the live project's schema came
+--    from hand-pastes at various vintages rather than a clean replay — the deploy workflow says so
+--    in its own comments. A migration that assumes its predecessor landed fails the whole run on
+--    exactly the project that needs it most, so this one creates what it needs if it is missing.
+--    Identical to app_0127's definition apart from the two defaults, and a no-op where it exists.
+create table if not exists public.spend_guard (
+  owner_id        uuid primary key references public.profiles(id) on delete cascade,
+  daily_cap_usd   numeric not null default 5  check (daily_cap_usd >= 0),
+  monthly_cap_usd numeric not null default 50 check (monthly_cap_usd >= 0),
+  kill_switch     boolean not null default false,
+  updated_at      timestamptz not null default now()
+);
+alter table public.spend_guard enable row level security;
+drop policy if exists "spend_guard owner all" on public.spend_guard;
+create policy "spend_guard owner all" on public.spend_guard
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
 -- 1. The table default, for owners who get a row from here on.
 alter table public.spend_guard alter column daily_cap_usd   set default 5;
 alter table public.spend_guard alter column monthly_cap_usd set default 50;
