@@ -100,8 +100,8 @@ export function huntSummary(config: HuntConfig): string {
   const what = config.niches.length === 0 ? 'every kind of local business'
     : config.niches.length === 1 ? `"${config.niches[0]}"`
     : `${config.niches.length} business types`;
-  const where = config.scope.mode === 'topN' ? `the top ${config.scope.n} US markets`
+  const where = config.scope.mode === 'topN' ? `the ${config.scope.n} biggest US cities`
     : config.scope.mode === 'state' ? config.scope.state
     : `the ${config.scope.region}`;
-  return `Every day: run ${config.searchesPerDay} searches across ${where} for ${what}, build up to ${config.demoQuota} demos + pitches, and queue them for your approval. Nothing sends on its own.`;
+  return `Every day it runs ${config.searchesPerDay} searches across ${where} looking for ${what}, builds up to ${config.demoQuota} of them a website with an email to match, and leaves those in your Queue to read. Nothing sends on its own.`;
 }

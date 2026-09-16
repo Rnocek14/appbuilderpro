@@ -32,16 +32,32 @@ import {
 import { fetchHuntReadiness } from '../lib/garvis/huntReadinessRun';
 import type { Readiness } from '../lib/garvis/huntReadiness';
 
-/** A key, described by what it switches on rather than by its variable name. */
+/** A key, described by what it switches on rather than by its variable name.
+ *
+ *  The labels used to BE the variable names in title case — "Claude API key", "Worker password",
+ *  "Resend API key". Those are what the machine calls them. `label` now says what the thing does,
+ *  and `vendor` carries the name you'll actually see on the page you copy it from, which is the
+ *  only reason the machine's name is worth showing at all. */
 interface KeyDef {
   env: string;
   label: string;
+  /** What this value is called where you go to get it — so the label can be plain English without
+   *  sending the owner hunting for something nobody's website calls by that name. */
+  vendor?: string;
   /** What stays dark without it — in the owner's words, not the system's. */
   dark: string;
   where: { text: string; url: string } | null;
   placeholder: string;
-  /** Some keys have a sensible value we can offer, so the owner does not have to invent one. */
-  suggest?: () => string;
+  /** Two or three words naming what the button saves, so five save buttons on one page do not all
+   *  read "Save". Reads as "Save the key", "Save the address". */
+  noun: string;
+  /** Explicit, because it decides whether a step counts as finished. It used to be inferred from
+   *  the word "optional" appearing in the label, which meant rewording a label silently made an
+   *  optional key required and the step un-completable. */
+  optional?: boolean;
+  /** Some keys have a sensible value we can offer, so the owner does not have to invent one. The
+   *  button says what it will do, not "Suggest". */
+  suggest?: { label: string; value: () => string };
 }
 
 /** A random, strong shared password. The owner should never have to invent one, and inventing a weak
@@ -70,8 +86,10 @@ const STEPS: StepDef[] = [
     keys: [
       {
         env: 'ANTHROPIC_API_KEY',
-        label: 'Claude API key',
-        dark: 'Scraping, site building and every draft stop before they start. This is the one that makes the first button work.',
+        noun: "the key",
+        label: 'The key that lets Claude write for you',
+        vendor: 'Anthropic calls this an API key',
+        dark: 'Searching for businesses, building their sites and writing anything all stop before they start. This is the one that makes the first button work.',
         where: { text: 'Get one from the Anthropic console', url: 'https://console.anthropic.com/settings/keys' },
         placeholder: 'sk-ant-…',
       },
@@ -85,24 +103,29 @@ const STEPS: StepDef[] = [
     keys: [
       {
         env: 'APP_ORIGIN',
-        label: 'This app’s web address',
-        dark: 'Demos still get built and no pitch is ever queued — silently. This is the quiet one that makes the app look broken.',
+        noun: "the address",
+        label: 'This app’s own web address',
+        dark: 'Sites still get built, and the email that should show them off is never written — silently. This is the quiet one that makes the app look broken.',
         where: null,
         placeholder: 'https://your-app.example.com',
-        suggest: () => window.location.origin,
+        suggest: { label: 'Use the address I’m on', value: () => window.location.origin },
       },
       {
         env: 'WORKER_SECRET',
-        label: 'Worker password',
-        dark: 'Reading a prospect’s site and finding their email fails without a word, so every business ends “no email found”. Nothing runs on the clock either.',
+        noun: "the password",
+        label: 'A password the app uses to talk to itself',
+        dark: 'Reading a business’s site and finding their email fails without a word, so every one of them ends “no email found”. Nothing runs on a schedule either.',
         where: null,
-        placeholder: 'press Suggest — any long random string',
-        suggest: strongSecret,
+        placeholder: 'press the button — any long random string',
+        suggest: { label: 'Make one up for me', value: strongSecret },
       },
       {
         env: 'GOOGLE_PLACES_API_KEY',
-        label: 'Google Places key (optional)',
-        dark: 'Nothing — Claude can find businesses on its own. Add this only if you want Google’s business listings as well.',
+        noun: "Google's key",
+        label: 'Google’s business listings',
+        vendor: 'Google calls this a Places API key',
+        optional: true,
+        dark: 'Nothing. Claude finds businesses on its own. Add this only if you want Google’s listings as well.',
         where: { text: 'Google Cloud console', url: 'https://console.cloud.google.com/apis/credentials' },
         placeholder: 'AIza…',
       },
@@ -116,8 +139,10 @@ const STEPS: StepDef[] = [
     keys: [
       {
         env: 'RESEND_API_KEY',
-        label: 'Resend API key',
-        dark: 'Every approved email sits in the Queue forever. Nothing sends.',
+        noun: "the sending key",
+        label: 'The key that actually sends your email',
+        vendor: 'Resend calls this an API key',
+        dark: 'Every email you approve sits in the Queue forever. Nothing leaves.',
         where: { text: 'Get one from Resend', url: 'https://resend.com/api-keys' },
         placeholder: 're_…',
       },
@@ -170,7 +195,7 @@ export default function Start() {
       toast('success', `Connected to ${label}. Every key below can now be saved from this page.`);
       await load();
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Could not connect.');
+      toast('error', e instanceof Error ? e.message : "That token didn't work — check you copied all of it.");
     } finally { setBusy(false); }
   };
 
@@ -184,18 +209,18 @@ export default function Start() {
       setJustSaved((s) => ({ ...s, [k.env]: true }));
       toast('success', `${k.label} saved. ${note}`);
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Could not save that key.');
+      toast('error', e instanceof Error ? e.message : `${k.label} didn't save — try again.`);
     } finally { setSaving(null); }
   };
 
   const arm = async () => {
     const secret = (values.WORKER_SECRET ?? '').trim();
     if (!isSet('WORKER_SECRET')) {
-      toast('info', 'Set the worker password in step 3 first — the clock uses the same one.');
+      toast('info', 'Do step 3 first — the clock uses the same password the app uses to talk to itself.');
       return;
     }
     if (!secret) {
-      toast('info', 'Paste the SAME worker password you saved in step 3. If the two differ, every job is rejected in silence.');
+      toast('info', 'Paste the SAME password you saved in step 3. If the two differ, every job is turned away without a word.');
       return;
     }
     setBusy(true);
@@ -205,12 +230,12 @@ export default function Start() {
       toast('success', `The clock is running — ${res}`);
       await load();
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Could not start the clock.');
+      toast('error', e instanceof Error ? e.message : "The clock didn't start — check the password matches step 3.");
     } finally { setBusy(false); }
   };
 
   const stepDone = (step: StepDef): boolean =>
-    step.keys.filter((k) => !k.label.includes('optional')).every((k) => isSet(k.env));
+    step.keys.filter((k) => !k.optional).every((k) => isSet(k.env));
 
   const doneCount = (connected ? 1 : 0) + STEPS.filter(stepDone).length + (clockRunning ? 1 : 0);
 
@@ -275,10 +300,10 @@ export default function Start() {
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="sbp_…"
                   className="w-72"
-                  aria-label="Supabase personal access token"
+                  aria-label="Your Supabase access token"
                 />
                 <Button variant="primary" size="md" onClick={() => void doConnect()} disabled={busy || !token.trim()}>
-                  {busy ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />} Connect
+                  {busy ? <Loader2 size={15} className="animate-spin" /> : <KeyRound size={15} />} Connect it
                 </Button>
               </div>
             </div>
@@ -301,10 +326,12 @@ export default function Start() {
                 <div key={k.env} className="rounded-xl border border-forge-border bg-forge-panel/30 p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-forge-ink">{k.label}</span>
+                    {k.optional && <span className="text-[11px] text-forge-dim">optional</span>}
                     {isSet(k.env)
                       ? <span className="inline-flex items-center gap-1 rounded-full bg-forge-ok/15 px-2 py-0.5 text-[11px] font-medium text-forge-ok"><Check size={11} /> on</span>
                       : <span className="rounded-full bg-forge-ember/15 px-2 py-0.5 text-[11px] font-medium text-forge-ember">not set</span>}
                   </div>
+                  {k.vendor && <p className="mt-0.5 text-[11px] text-forge-dim/70">{k.vendor}</p>}
                   <p className="mt-1 text-xs text-forge-dim">
                     <span className="text-forge-dim/80">Without it: </span>{k.dark}
                   </p>
@@ -328,16 +355,20 @@ export default function Start() {
                     {k.suggest && (
                       <Button
                         variant="ghost" size="sm" disabled={!connected}
-                        onClick={() => setValues((s) => ({ ...s, [k.env]: k.suggest!() }))}
-                      >Suggest</Button>
+                        onClick={() => setValues((s) => ({ ...s, [k.env]: k.suggest!.value() }))}
+                      >{k.suggest.label}</Button>
                     )}
+                    {/* Five of these sit on one page. They used to all read "Save", which is the
+                        same defect as four buttons reading "Build the pitch": nothing on screen
+                        tells you which one you are about to press. Each names its own field. */}
                     <Button
                       variant="outline" size="sm"
+                      aria-label={`${isSet(k.env) ? 'Replace' : 'Save'} ${k.noun} — ${k.label}`}
                       onClick={() => void save(k)}
                       disabled={!connected || saving === k.env || !(values[k.env] ?? '').trim()}
                     >
                       {saving === k.env ? <Loader2 size={14} className="animate-spin" /> : null}
-                      {isSet(k.env) ? 'Replace' : 'Save'}
+                      {isSet(k.env) ? `Replace ${k.noun}` : `Save ${k.noun}`}
                     </Button>
                   </div>
                 </div>
@@ -369,8 +400,8 @@ export default function Start() {
           locked={!connected}
         >
           <p className="text-sm text-forge-dim">
-            Paste the SAME worker password you saved in step 3. If the two do not match, every job
-            fires and is rejected in silence — the clock reads all-green and nothing happens.
+            Paste the SAME password you saved in step 3. If the two do not match, every job fires and
+            is turned away without a word — this page reads all-green and nothing actually happens.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Input
@@ -378,18 +409,18 @@ export default function Start() {
               type="password"
               value={values.WORKER_SECRET ?? ''}
               onChange={(e) => setValues((s) => ({ ...s, WORKER_SECRET: e.target.value }))}
-              placeholder="the worker password from step 3"
+              placeholder="the password from step 3"
               className="w-64"
-              aria-label="Worker password, again"
+              aria-label="The password from step 3, again"
               disabled={!connected}
             />
             <Button variant="outline" size="sm" onClick={() => void arm()} disabled={busy || !connected}>
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />} Start it
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Radio size={14} />} Start the clock
             </Button>
           </div>
           {clockRunning && status !== null && status !== 'error' && (
             <p className="mt-2 text-xs text-forge-ok">
-              Running — {status.cron.filter((c) => c.active).length} jobs scheduled.
+              Running — {status.cron.filter((c) => c.active).length} jobs on the schedule.
             </p>
           )}
         </Section>

@@ -73,7 +73,9 @@ check('the order kind is client_hunt', CLIENT_HUNT_KIND === 'client_hunt');
 // --- the human summary is honest about scope + the send boundary -----------------------------
 {
   const all = huntSummary({ niches: [], scope: { mode: 'topN', n: 50 }, searchesPerDay: 20, demoQuota: 5 });
-  check('summary of a hands-off hunt says it hunts every local business', /every kind of local business/.test(all) && /5 demos/.test(all));
+  check('summary of a hands-off hunt says it hunts every local business', /every kind of local business/.test(all) && /up to 5 /.test(all));
+  // The summary is read by the owner, not by us: no "demos", no "pitches", no "markets".
+  check('summary uses no house vocabulary', !/\b(demos?|pitch(es)?|markets?|niche)\b/i.test(all));
   check('summary states nothing sends on its own', /nothing sends on its own/i.test(all));
   const one = huntSummary({ niches: ['roofers'], scope: { mode: 'state', state: 'TX' }, searchesPerDay: 10, demoQuota: 5 });
   check('summary of a narrowed hunt names the niche', /roofers/.test(one) && /TX/.test(one));

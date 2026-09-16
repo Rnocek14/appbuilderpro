@@ -27,7 +27,6 @@ import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
 import { SavedAudits } from '../components/garvis/SavedAudits';
-import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
 import { profileFromScrape } from '../lib/preview/scrapeProfile';
 import { queuePitch } from '../lib/garvis/outreach';
 import { HuntReadiness } from '../components/garvis/HuntReadiness';
@@ -69,7 +68,6 @@ export default function WinClients() {
   const [searched, setSearched] = useState(false);
   const [view, setView] = useState<'list' | 'web'>('list');
   const [selected, setSelected] = useState<number | null>(null);
-  const [stage, setStage] = useState<'hub' | 'find'>('hub'); // enter on the pipeline canvas
   // Daily automatic hunt (a standing order) — set once, then Garvis sweeps fresh markets every day.
   // Hands-off by default: no niche needed — it hunts every kind of local business.
   const [hunt, setHunt] = useState<StandingOrder | null>(null);
@@ -323,210 +321,209 @@ export default function WinClients() {
     return { id: String(i), label: b.name, group: v, metric, badge: score ?? '?' };
   });
 
-  // Pipeline stage counts (this session) — honest zeros until you've done the work.
+  // The hub used to be the first thing this page showed: a 520px orb diagram with "Find / Sites
+  // built / Pitches / Clients" and "none yet" under three of them, standing between the owner and
+  // every control on the page. A picture of zeros is not a landing screen. The counts that mattered
+  // are now a line of text above the work, and the work opens immediately.
   const builtCount = rows.filter((r) => r.built).length;
   const queuedCount = rows.filter((r) => r.built?.queued).length;
-  const pipeCenter = {
-    kicker: 'Find clients',
-    title: searched && (niche.trim() || area.trim()) ? [niche.trim(), area.trim()].filter(Boolean).join(' · ') : 'Find new clients',
-    sub: searched ? `${rows.length} found` : 'find businesses to pitch',
-  };
-  const pipeNodes: CanvasNode[] = [
-    { key: 'find', emoji: '🔎', label: 'Find', sub: searched ? `${rows.length} found` : 'start here' },
-    { key: 'built', emoji: '✨', label: 'Sites built', sub: builtCount ? `${builtCount} ready` : 'none yet', count: builtCount, dim: builtCount === 0 },
-    { key: 'pitch', emoji: '✉️', label: 'Pitches', sub: queuedCount ? `${queuedCount} in Queue` : 'none yet', count: queuedCount, accent: 'violet', dim: queuedCount === 0 },
-    { key: 'clients', emoji: '🤝', label: 'Clients', sub: 'billing · MRR' },
-  ];
-  const onHub = (k: string) => {
-    if (k === 'clients') { navigate('/garvis/client-billing'); return; } // the won-clients live in the billing book
-    setStage('find'); // find / sites built / pitches all open the results, where each row shows its state
-  };
 
   return (
     <AppShell>
-      {stage === 'hub' ? (
-        <div className="mx-auto max-w-4xl px-4 py-6">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
-            <h1 className="text-xl font-semibold text-forge-ink">Find clients</h1>
-          </div>
-          <p className="mb-4 text-sm text-forge-dim">Your pipeline — tap a stage to work it. Nothing sends without your approval.</p>
-          <CanvasScene center={pipeCenter} nodes={pipeNodes} onOpen={onHub} height="min(66vh,520px)" />
-        </div>
-      ) : (
       <div className="mx-auto max-w-4xl px-4 py-6">
-        <button onClick={() => setStage('hub')} className="mb-3 inline-flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ember">← Pipeline</button>
         <div className="mb-1 flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
-          <h1 className="text-xl font-semibold text-forge-ink">Find clients</h1>
+          <h1 className="text-xl font-semibold text-forge-ink">Search a town or trade</h1>
         </div>
-        <p className="mb-4 text-sm text-forge-dim">
-          Find local businesses, see whose website is weak, and build them a fresh one — the pitch lands in your Queue to approve before anything sends.
+        <p className="mb-4 max-w-2xl text-sm text-forge-dim">
+          Pick a kind of business and a place, and we look for real ones there and check how good each
+          of their websites is. Build any of them a better one — the email lands in your Queue for you
+          to read. Nothing sends on its own.
         </p>
 
-        {/* Ready-to-hunt light: right where you're about to hunt, so a missing key or the
-            APP_ORIGIN silent-blocker is visible before you wonder why nothing queued. */}
-        <div className="mb-5"><HuntReadiness /></div>
+        {/* Ready-to-search light: right where you're about to search, so a missing key or the
+            silent app-address blocker is visible before you wonder why nothing happened. */}
+        <div className="mb-4"><HuntReadiness /></div>
 
-        {/* Find bar */}
+        {/* ── THE ONE SEARCH ─────────────────────────────────────────────────
+            One row, one orange button. Everything that used to sit beside it —
+            the nationwide sweep, the town-list study, the URL scan, the daily
+            automatic hunt — is still here, one disclosure away. */}
         <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-3">
           <div className="flex flex-col gap-2 sm:flex-row">
-            <input value={niche} onChange={(e) => setNiche(e.target.value)} placeholder="Niche — e.g. roofers, dentists, plumbers"
+            <input value={niche} onChange={(e) => setNiche(e.target.value)} placeholder="Kind of business — e.g. roofers, dentists, plumbers"
+              aria-label="Kind of business"
               onKeyDown={(e) => { if (e.key === 'Enter') void find(); }}
               className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
             <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="Town or area — e.g. Lake Geneva, WI"
+              aria-label="Town or area"
               onKeyDown={(e) => { if (e.key === 'Enter') void find(); }}
               className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-            <select value={engine} onChange={(e) => setEngine(e.target.value as DiscoveryEngine)}
-              aria-label="Discovery engine" title="Auto uses Google Places when its key is set and falls back to the Claude web-search scout when it isn't."
-              className="rounded-lg border border-forge-border bg-forge-bg px-2.5 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none">
-              <option value="auto">Engine: auto</option>
-              <option value="places">Google Places</option>
-              <option value="claude">Claude scout</option>
-            </select>
             <Button variant="primary" size="md" onClick={() => void find()} disabled={finding || !niche.trim()}>
-              {finding ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Find businesses
+              {finding ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Search
             </Button>
           </div>
-          {/* Or scan a prospect you already have — paste their site and Garvis reads it, audits it, and
-              (on Build) rebuilds it from their own real content + photos. */}
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <input value={scanUrl} onChange={(e) => setScanUrl(e.target.value)} placeholder="Or paste a site to scan — e.g. joesroofing.com"
-              onKeyDown={(e) => { if (e.key === 'Enter') void scanOne(); }}
-              className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-            <Button variant="outline" size="md" onClick={() => void scanOne()} disabled={scanning || !scanUrl.trim()}>
-              {scanning ? <Loader2 size={15} className="animate-spin" /> : <Globe size={15} />} Scan a URL
-            </Button>
-          </div>
-          {/* Go national: fan the niche search across the country (or a state). Discovery only —
-              one Google search per city, deduped nationwide, streamed in. */}
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <span className="flex items-center gap-1.5 text-xs font-medium text-forge-ink"><Radar size={13} className="text-forge-ember" /> Or sweep the nation</span>
-            <select value={scope} onChange={(e) => setScope(e.target.value)}
-              className="rounded-lg border border-forge-border bg-forge-bg px-2.5 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none">
-              <option value="top25">Top 25 markets</option>
-              <option value="top50">Top 50 markets</option>
-              <option value="top100">Top 100 markets</option>
-              <option value="all">All {US_CITIES.length} cities</option>
-              <optgroup label="By state">
-                {US_STATES.map((st) => <option key={st} value={st}>{st}</option>)}
-              </optgroup>
-            </select>
-            {sweeping ? (
-              <Button variant="outline" size="md" onClick={() => { stopSweep.current = true; }}>
-                <Square size={13} /> Stop
-              </Button>
-            ) : (
-              <>
-                <Button variant="primary" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim()}>
-                  <Radar size={15} /> Sweep the nation
-                </Button>
-                {/* THE COUNTY STUDY: appears only when the Area field holds a town LIST ("Lake
-                    Geneva, Delavan, Elkhorn WI"). One press = every town × every trade synonym,
-                    every find audited AND recorded, and the whole run filed into a scan cohort —
-                    the raw material of the "your site was one of N we looked at" pitch line. */}
-                {parseTownList(area).length >= 2 && (
-                  <>
-                    <Button variant="outline" size="md" onClick={() => void sweepAreaStudy()} disabled={!niche.trim()}
-                      title="Sweep every town listed in the Area box, audit everything found, and file it all into a study cohort.">
-                      <Radar size={15} /> Sweep these towns (collect study)
-                    </Button>
-                    {/* The same study, unattended: hands the plan to the heartbeat, which processes a
-                        slice every tick until done and pauses itself with the study attached. The
-                        version to use for anything bigger than a handful of towns. */}
-                    <Button variant="outline" size="md" onClick={() => void startServerStudy()} disabled={!niche.trim()}
-                      title="Run the same study on the server — a slice every 15 minutes until complete. Safe to close this tab.">
-                      <CalendarClock size={15} /> Run on the server
-                    </Button>
-                  </>
-                )}
-              </>
-            )}
-            {sweepProg && (
-              <span className="text-[11px] text-forge-dim">
-                {sweeping && <Loader2 size={11} className="mr-1 inline animate-spin" />}
-                {sweepProg.done}/{sweepProg.total} cities · {sweepProg.found} found
-                {sweepProg.failed > 0 && <span className="text-forge-err"> · {sweepProg.failed} failed</span>}
-                {sweepProg.city ? ` · ${sweepProg.city}` : ''}
-              </span>
-            )}
-          </div>
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores). A national sweep runs {sweepCostLine(citiesFor(scope === 'all' ? { mode: 'topN', n: US_CITIES.length } : scope.startsWith('top') ? { mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 } : { mode: 'state', state: scope }).length)} Build reads their real content + photos; nothing emails until you approve it in the Queue.</p>
+          <p className="mt-2 flex items-start gap-1.5 text-[11px] text-forge-dim">
+            <Info size={12} className="mt-px shrink-0" /> Only businesses that really exist — we never
+            invent one — and the website check reads their actual page, so the verdict is real too.
+          </p>
 
-          {/* AUTOPILOT — turn the same niche + scope into a DAILY AUTOMATIC hunt. No URLs to paste:
-              Garvis sweeps fresh markets every day, builds demos, and queues pitches for approval. */}
-          <div className="mt-3 rounded-xl border border-forge-border bg-forge-bg/40 p-3">
-            {hunt ? (
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-forge-ink">
-                    <CalendarClock size={14} className="text-forge-ember" /> {hunt.label}
-                    <span className={cn('rounded-full border px-1.5 py-0.5 text-[10px]', hunt.status === 'active' ? 'border-forge-ok/40 bg-forge-ok/15 text-forge-ok' : 'border-forge-border bg-forge-raised text-forge-dim')}>
-                      {hunt.status === 'active' ? 'running daily' : 'paused'}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 line-clamp-2 text-[11.5px] text-forge-dim">{orderStatusLine(hunt)}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button variant="primary" size="sm" onClick={() => void runHuntNow()} disabled={runningHunt || hunt.status !== 'active'}>
-                    {runningHunt ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run now
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => void toggleHunt()}>
-                    {hunt.status === 'active' ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => void stopHunt()}><Power size={13} /> Turn off</Button>
-                </div>
+          {/* ── the other ways to search, folded away ─────────────────────── */}
+          <details className="mt-3 border-t border-forge-border/60 pt-2">
+            <summary className="cursor-pointer list-none text-xs text-forge-dim transition-colors hover:text-forge-ink">
+              <span className="underline decoration-dotted underline-offset-2">Other ways to search</span>
+            </summary>
+            <div className="mt-3 space-y-3">
+              {/* One site you already know about. */}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input value={scanUrl} onChange={(e) => setScanUrl(e.target.value)} placeholder="A website you already know about — e.g. joesroofing.com"
+                  aria-label="A website you already know about"
+                  onKeyDown={(e) => { if (e.key === 'Enter') void scanOne(); }}
+                  className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
+                <Button variant="outline" size="md" onClick={() => void scanOne()} disabled={scanning || !scanUrl.trim()}>
+                  {scanning ? <Loader2 size={15} className="animate-spin" /> : <Globe size={15} />} Check this one site
+                </Button>
               </div>
-            ) : (
-              <div>
-                <div className="flex items-center gap-1.5 text-sm font-medium text-forge-ink"><CalendarClock size={14} className="text-forge-ember" /> Put it on autopilot</div>
-                <p className="mt-0.5 text-[11.5px] text-forge-dim">{huntSummary(huntCfgPreview)}</p>
-                {!niche.trim() && (
-                  <p className="mt-0.5 text-[10.5px] text-forge-ok/90">✓ No niche needed — it hunts every kind of local business, including ones with <em>no website yet</em> (your best prospects). Type a niche above to narrow it.</p>
+
+              {/* The whole country, or one state. */}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <select value={scope} onChange={(e) => setScope(e.target.value)} aria-label="How much of the country to search"
+                  className="rounded-lg border border-forge-border bg-forge-bg px-2.5 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+                  <option value="top25">The 25 biggest cities</option>
+                  <option value="top50">The 50 biggest cities</option>
+                  <option value="top100">The 100 biggest cities</option>
+                  <option value="all">Every city we know ({US_CITIES.length})</option>
+                  <optgroup label="One state only">
+                    {US_STATES.map((st) => <option key={st} value={st}>{st}</option>)}
+                  </optgroup>
+                </select>
+                {sweeping ? (
+                  <Button variant="outline" size="md" onClick={() => { stopSweep.current = true; }}>
+                    <Square size={13} /> Stop searching
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim()}>
+                    <Radar size={15} /> Search all those cities
+                  </Button>
                 )}
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label className="flex items-center gap-1 text-[11px] text-forge-dim">Searches/day
-                    <input type="number" min={1} max={40} value={searchesPerDay} onChange={(e) => setSearchesPerDay(Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)))}
-                      className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-                  </label>
-                  <label className="flex items-center gap-1 text-[11px] text-forge-dim">Demos/day
-                    <input type="number" min={1} max={25} value={demoQuota} onChange={(e) => setDemoQuota(Math.max(1, Math.min(25, parseInt(e.target.value, 10) || 1)))}
-                      className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-                  </label>
-                  <Button variant="primary" size="sm" onClick={() => void startHunt()} disabled={savingHunt}>
-                    {savingHunt ? <Loader2 size={13} className="animate-spin" /> : <CalendarClock size={13} />} Turn on daily hunt
+                {sweepProg && (
+                  <span className="text-[11px] text-forge-dim">
+                    {sweeping && <Loader2 size={11} className="mr-1 inline animate-spin" />}
+                    {sweepProg.done} of {sweepProg.total} cities · {sweepProg.found} found
+                    {sweepProg.failed > 0 && <span className="text-forge-err"> · {sweepProg.failed} couldn’t be searched</span>}
+                    {sweepProg.city ? ` · ${sweepProg.city}` : ''}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-forge-dim">
+                Searching all of them costs {sweepCostLine(citiesFor(scopeToSweep()).length)}
+              </p>
+
+              {/* A list of towns becomes a study — the raw material of the "yours was one of N we
+                  looked at" line. Only offered once the box actually holds a list. */}
+              {parseTownList(area).length >= 2 && !sweeping && (
+                <div className="flex flex-col gap-2 rounded-lg border border-forge-border/60 bg-forge-bg/40 p-2.5 sm:flex-row sm:items-center">
+                  <span className="min-w-0 flex-1 text-[11.5px] text-forge-dim">
+                    You listed {parseTownList(area).length} towns. We can go through every one, check
+                    every business we find, and keep the whole thing as a study you can quote in a pitch.
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => void sweepAreaStudy()} disabled={!niche.trim()}>
+                    <Radar size={14} /> Do it now, in this tab
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void startServerStudy()} disabled={!niche.trim()}
+                    title="A slice every 15 minutes until it's done. Safe to close this tab.">
+                    <CalendarClock size={14} /> Do it in the background
                   </Button>
                 </div>
-                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} /> Runs daily via Google Places — real businesses with phone + address, deduped, and no market swept twice (it stops once one is tapped out). Every demo + pitch lands in your Queue to approve — nothing sends on its own.</p>
+              )}
+
+              {/* ── have it search on its own, every day ───────────────────── */}
+              <div className="rounded-xl border border-forge-border bg-forge-bg/40 p-3">
+                {hunt ? (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-forge-ink">
+                        <CalendarClock size={14} className="text-forge-ember" /> {hunt.label}
+                        <span className={cn('rounded-full border px-1.5 py-0.5 text-[10px]', hunt.status === 'active' ? 'border-forge-ok/40 bg-forge-ok/15 text-forge-ok' : 'border-forge-border bg-forge-raised text-forge-dim')}>
+                          {hunt.status === 'active' ? 'searching every day' : 'paused'}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-[11.5px] text-forge-dim">{orderStatusLine(hunt)}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => void runHuntNow()} disabled={runningHunt || hunt.status !== 'active'}>
+                        {runningHunt ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Do today’s now
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void toggleHunt()}>
+                        {hunt.status === 'active' ? <><Pause size={13} /> Pause it</> : <><Play size={13} /> Start it again</>}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => void stopHunt()}><Power size={13} /> Turn it off</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-forge-ink"><CalendarClock size={14} className="text-forge-ember" /> Have it search every day without you</div>
+                    <p className="mt-0.5 text-[11.5px] text-forge-dim">{huntSummary(huntCfgPreview)}</p>
+                    {!niche.trim() && (
+                      <p className="mt-0.5 text-[10.5px] text-forge-ok/90">✓ You don’t have to pick a kind of business — it looks at every sort of local one, including the ones with <em>no website at all</em>, which are the easiest to sell. Type one above to narrow it.</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-1 text-[11px] text-forge-dim">Searches a day
+                        <input type="number" min={1} max={40} value={searchesPerDay} onChange={(e) => setSearchesPerDay(Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)))}
+                          className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+                      </label>
+                      <label className="flex items-center gap-1 text-[11px] text-forge-dim">Sites built a day
+                        <input type="number" min={1} max={25} value={demoQuota} onChange={(e) => setDemoQuota(Math.max(1, Math.min(25, parseInt(e.target.value, 10) || 1)))}
+                          className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+                      </label>
+                      <Button variant="outline" size="sm" onClick={() => void startHunt()} disabled={savingHunt}>
+                        {savingHunt ? <Loader2 size={13} className="animate-spin" /> : <CalendarClock size={13} />} Start searching daily
+                      </Button>
+                    </div>
+                    <p className="mt-1.5 flex items-start gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} className="mt-px shrink-0" /> Real businesses with a phone and an address, never the same one twice, and it stops on a town once there is nothing new there. Every site it builds and every email it writes waits in your Queue — nothing sends on its own.</p>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+
+              {/* Who does the looking. Auto is right for almost everyone; the choice is here for
+                  the case where one of the two is down or you want to avoid Google entirely. */}
+              <label className="flex flex-wrap items-center gap-2 text-[11px] text-forge-dim">
+                Who does the searching
+                <select value={engine} onChange={(e) => setEngine(e.target.value as DiscoveryEngine)}
+                  aria-label="Who does the searching"
+                  className="rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+                  <option value="auto">Whichever is set up (recommended)</option>
+                  <option value="places">Google’s business listings</option>
+                  <option value="claude">Claude, searching the open web</option>
+                </select>
+              </label>
+            </div>
+          </details>
         </div>
 
-        {/* Every audit we've run is kept here — the accumulating prospect intelligence (app_0072). */}
-        <SavedAudits />
-
-        {/* Results */}
-        {searched && (
+        {/* ── RESULTS ────────────────────────────────────────────────────── */}
+        {searched ? (
           <div className="mt-5">
             {finding && !rows.length ? (
-              <div className="flex items-center gap-2 py-8 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Searching…</div>
+              <div className="flex items-center gap-2 py-8 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Looking…</div>
             ) : !rows.length ? (
-              <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-6 text-center text-sm text-forge-dim">No businesses came back for that search. Try a broader niche or a nearby town.</div>
+              <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-6 text-center text-sm text-forge-dim">Nothing came back for that. Try a broader kind of business, or a nearby town.</div>
             ) : (
               <>
                 <div className="mb-3 flex items-center justify-between text-xs text-forge-dim">
-                  <span>{rows.length} found{weakCount > 0 && <span className="text-forge-ember"> · {weakCount} with weak sites</span>}</span>
+                  <span>
+                    {rows.length} found{weakCount > 0 && <span className="text-forge-ember"> · {weakCount} with a weak website</span>}
+                    {builtCount > 0 && <span> · {builtCount} built</span>}
+                    {queuedCount > 0 && <span className="text-forge-ok"> · {queuedCount} waiting in your Queue</span>}
+                  </span>
                   <span className="inline-flex overflow-hidden rounded-lg border border-forge-border">
-                    <button onClick={() => setView('list')} className={cn('px-2.5 py-1', view === 'list' ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>List</button>
-                    <button onClick={() => setView('web')} className={cn('px-2.5 py-1', view === 'web' ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>Web</button>
+                    <button onClick={() => setView('list')} className={cn('px-2.5 py-1', view === 'list' ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>As a list</button>
+                    <button onClick={() => setView('web')} className={cn('px-2.5 py-1', view === 'web' ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>As a picture</button>
                   </span>
                 </div>
                 {view === 'web' ? (
-                  <>
-                    <ConstellationWeb nodes={webNodes} groups={WEB_GROUPS} height="440px"
-                      title="Bigger orb = weaker site = more opportunity · tap one to open its web" onOpen={(id) => setSelected(Number(id))} />
-                  </>
+                  <ConstellationWeb nodes={webNodes} groups={WEB_GROUPS} height="440px"
+                    title="The bigger the circle, the worse their website — tap one to open it" onOpen={(id) => setSelected(Number(id))} />
                 ) : (
                 <div className="space-y-2.5">
                   {rows.map((b, i) => (
@@ -534,9 +531,9 @@ export default function WinClients() {
                       <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <button onClick={() => setSelected(i)} className="truncate text-sm font-semibold text-forge-ink hover:text-forge-ember" title="Open this business's web">{b.name}</button>
+                            <button onClick={() => setSelected(i)} aria-label={`Open ${b.name}`} className="truncate text-sm font-semibold text-forge-ink hover:text-forge-ember">{b.name}</button>
                             {b.audit && <span className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', VERDICT_STYLE[b.audit.verdict].cls)}>{VERDICT_STYLE[b.audit.verdict].label}{b.audit.score != null ? ` · ${b.audit.score}` : ''}</span>}
-                            {!b.audit && b.url && <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> checking site…</span>}
+                            {!b.audit && b.url && <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> looking at their site…</span>}
                             {/* Google's own rating. Places returns it on every search and we were paying
                                 for it and discarding it — it is the fastest read on whether a business
                                 is worth the call. Display-at-use only (Places ToS): never persisted. */}
@@ -548,7 +545,7 @@ export default function WinClients() {
                           </div>
                           {b.url
                             ? <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>
-                            : <span className="text-[11px] text-forge-ember">no website listed</span>}
+                            : <span className="text-[11px] text-forge-ember">no website at all</span>}
                           {b.audit && b.audit.signals.length > 0 && (
                             <div className="mt-1.5 flex flex-wrap gap-1.5">
                               {b.audit.signals.map((s) => (
@@ -563,16 +560,16 @@ export default function WinClients() {
                         <div className="shrink-0">
                           {b.built ? (
                             <div className="flex flex-col items-end gap-1">
-                              <a href={b.built.previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">Open site <ExternalLink size={11} /></a>
-                              <div className={cn('text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · add their email in Contacts to pitch'}</div>
+                              <a href={b.built.previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">Open the site we built <ExternalLink size={11} /></a>
+                              <div className={cn('text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> email waiting in your Queue</span> : 'built — we couldn’t find an email for them'}</div>
                               {/* When they say yes → carry name + email straight into the billing book (no re-typing). */}
                               <NavLink to={`/garvis/client-billing?business=${encodeURIComponent(b.name)}&email=${encodeURIComponent(b.built.email ?? '')}&tier=website_automation`}
                                 className="inline-flex items-center gap-1 text-[11px] text-forge-ember hover:underline">
-                                Record as client <ArrowRight size={11} />
+                                They became a client <ArrowRight size={11} />
                               </NavLink>
                             </div>
                           ) : (
-                            <Button variant="primary" size="sm" onClick={() => void build(i)} disabled={b.building || !b.url}>
+                            <Button variant="primary" size="sm" aria-label={`Build a website for ${b.name}`} onClick={() => void build(i)} disabled={b.building || !b.url}>
                               {b.building ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Build their site
                             </Button>
                           )}
@@ -584,23 +581,30 @@ export default function WinClients() {
                 )}
                 {rows.some((r) => r.built?.queued) && (
                   <NavLink to="/garvis/queue" className="mt-4 inline-flex items-center gap-1.5 text-sm text-forge-ember hover:underline">
-                    Review your pitches in the Queue <ArrowRight size={14} />
+                    Read the emails waiting in your Queue <ArrowRight size={14} />
                   </NavLink>
                 )}
               </>
             )}
           </div>
+        ) : (
+          /* Nothing searched yet. "Type something above to start" is the defect this whole pass is
+             about, so this says the one useful thing instead: there is an easier door, and here is
+             everything you have already checked. */
+          <p className="mt-5 text-sm text-forge-dim">
+            You don’t have to search to get started —{' '}
+            <NavLink to="/garvis/leads" className="text-forge-ember hover:underline">Businesses to pitch</NavLink>{' '}
+            fills a list for you at the press of one button. Come here when you want one particular
+            trade in one particular town.
+          </p>
         )}
 
-        {!searched && (
-          <div className="mt-5 rounded-xl border border-dashed border-forge-border bg-forge-panel/20 p-6 text-center text-sm text-forge-dim">
-            Type a niche and a town above to start. Garvis finds real businesses, checks each site, and shows you who’s worth pitching.
-          </div>
-        )}
+        {/* Every website we have ever checked is kept — the accumulating prospect intelligence
+            (app_0072). Below the work, because it is a record, not a next step. */}
+        <div className="mt-6"><SavedAudits /></div>
       </div>
-      )}
 
-      {/* tap a prospect → its own web (canvas): their site, the new site, the pitch, contact */}
+      {/* tap a business → its own panel: their site, the new site, the email, the contact */}
       {selected != null && rows[selected] && (
         <ProspectCanvas
           data={{ name: rows[selected].name, url: rows[selected].url, audit: rows[selected].audit, built: rows[selected].built ?? null }}
@@ -612,4 +616,3 @@ export default function WinClients() {
     </AppShell>
   );
 }
-
