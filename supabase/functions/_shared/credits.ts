@@ -9,7 +9,11 @@
 //                                        (proportional to cost) and logs the usage_events row.
 //
 // Backed by the refresh_credits / spend_credits SQL functions (app_0017_credits.sql). Kept dependency-
-// light: the admin client is typed structurally so this imports nothing.
+// light: the admin client is typed structurally, so the only import is the pure module that owns the
+// wording of a refusal (spendLimitCore) — shared with the screens, so a gate and the page explaining
+// it cannot describe the same wall differently.
+
+import { parseGuard, limitReached, limitMessage, type LimitKind } from './spendLimitCore.ts';
 
 /** Minimal structural shape of the service-role Supabase client (avoids importing the SDK type).
  *  `.rpc()` returns a thenable query builder, not a plain Promise — hence PromiseLike. */
@@ -60,9 +64,24 @@ export class InsufficientCreditsError extends Error {
 
 /** THE SPEND GUARD (app_0127) — real-dollar caps + kill switch, thrown from the same chokepoint so
  *  every existing catch (402) handles it. Subclasses InsufficientCreditsError on purpose: no call
- *  site changes, but the message tells the operator exactly which wall they hit. */
+ *  site changes, but the message tells the operator exactly which wall they hit.
+ *
+ *  `kind` rides along because subclassing is exactly what let the message get lost: a call site that
+ *  caught the parent and wrote its own "out of credits, please upgrade" was telling someone to buy
+ *  something that would not have helped. A responder with the kind in hand can answer honestly
+ *  without having to read the prose. */
 export class SpendCapError extends InsufficientCreditsError {
-  constructor(message: string) { super(0); this.message = message; this.name = 'SpendCapError'; }
+  constructor(message: string, public kind: LimitKind = 'none') {
+    super(0); this.message = message; this.name = 'SpendCapError';
+  }
+}
+
+/** The reason behind a 402, for the `code` field of an error response. 'out_of_credits' covers the
+ *  plain InsufficientCreditsError — the one case where upgrading genuinely is the remedy. */
+export function failureKind(e: unknown): LimitKind {
+  if (e instanceof SpendCapError) return e.kind;
+  if (e instanceof InsufficientCreditsError) return 'out_of_credits';
+  return 'none';
 }
 
 /** The user's plan ('free' | 'starter' | 'pro'), defaulting to 'free'. Drives model selection.
@@ -81,9 +100,14 @@ export async function checkCredits(admin: Admin, userId: string, kind: CreditKin
   const guard = await admin.rpc('spend_guard_state', { p_user: userId });
   if (!guard.error && guard.data && typeof guard.data === 'object') {
     const g = guard.data as { kill?: boolean; daily_cap?: number; monthly_cap?: number; spent_today?: number; spent_month?: number };
-    if (g.kill) throw new SpendCapError('The AI kill switch is ON — nothing spends until you flip it off in Settings → Spending guard.');
-    if (Number(g.spent_today) >= Number(g.daily_cap)) throw new SpendCapError(`Daily spend cap reached ($${Number(g.spent_today).toFixed(2)} of $${Number(g.daily_cap).toFixed(2)}) — raise it in Settings → Spending guard, or wait for the UTC day to reset.`);
-    if (Number(g.spent_month) >= Number(g.monthly_cap)) throw new SpendCapError(`Monthly spend cap reached ($${Number(g.spent_month).toFixed(2)} of $${Number(g.monthly_cap).toFixed(2)}) — raise it in Settings → Spending guard if this is intentional.`);
+    // The wording lives in spendLimitCore so the sentence the gate refuses with and the sentence
+    // the screen explains it with are the same sentence. It used to be written twice, in the
+    // machine's terms both times ("Daily spend cap reached", "Settings → Spending guard").
+    const state = parseGuard(g);
+    if (state) {
+      const kind = limitReached(state);
+      if (kind !== 'none') throw new SpendCapError(limitMessage(kind, state), kind);
+    }
   }
   const { data, error } = await admin.rpc('refresh_credits', { p_user: userId });
   if (error) throw new Error(`credits check failed: ${error.message}`);

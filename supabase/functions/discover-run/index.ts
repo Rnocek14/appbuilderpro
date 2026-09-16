@@ -18,7 +18,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { completeWithWebSearch } from '../_shared/ai.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, failureKind } from '../_shared/credits.ts';
 import { LOCAL_NICHES } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { bigMetroCities } from '../../../src/lib/garvis/bigCities.ts';
 import { parsePlace, buildDiscoveryQueries, exhaustionUpdate, placesQueryText, PLACES_FIELD_MASK, type PlaceRaw } from '../../../src/lib/garvis/placesDiscovery.ts';
@@ -167,10 +167,16 @@ Deno.serve(async (req) => {
       const state = (rawState ?? '').trim();
       if (!city) return json({ error: 'Targeted discovery needs a city.' }, 400);
       // Interactive caller ⇒ a hard, honest 402 — the grid's soft-skip would read as "found nothing".
+      // PASS THE REAL REASON UP. This used to answer "Out of credits — Upgrade or wait for your
+      // monthly refill" to anyone the gate turned away, including someone who had simply reached the
+      // daily limit they set for themselves. Neither upgrading nor waiting a month would have done
+      // anything; raising their own number or waiting until midnight would have. SpendCapError
+      // subclasses InsufficientCreditsError, so catching the parent and writing a new sentence threw
+      // the only useful one away.
       try { await checkCredits(admin, ownerId, 'discover'); }
       catch (e) {
         if (!(e instanceof InsufficientCreditsError)) throw e;
-        return json({ error: 'Out of credits — Claude scouting needs credits. Upgrade or wait for your monthly refill.' }, 402);
+        return json({ error: e.message, code: failureKind(e) }, 402);
       }
       // The combo joins the grid (unique owner_id,query_text makes re-runs converge on one row), so
       // targeted searches get the same bookkeeping + exhaustion memory as the background hunt.
@@ -212,6 +218,9 @@ Deno.serve(async (req) => {
       .order('last_run_at', { ascending: true, nullsFirst: true }).limit(batch);
 
     let combosRun = 0; let newLeads = 0; let dupes = 0; let apiError: string | null = null;
+    // Which wall stopped the scout, if one did — so the caller can tell a limit from a breakage
+    // without reading the prose.
+    let limitCode: ReturnType<typeof failureKind> = 'none';
     // audit 12 §1.2 (unmetered call sites): gate the scout phase ONCE per run — every combo below is
     // a paid Anthropic web-search call (each records its real cost inside scout()). Out of credits
     // skips scouting with an honest note instead of a hard 402, because Places discovery is keyed
@@ -222,7 +231,10 @@ Deno.serve(async (req) => {
       catch (e) {
         if (!(e instanceof InsufficientCreditsError)) throw e;
         scoutAllowed = false;
-        apiError = 'Out of credits — Claude scouting skipped this run. Upgrade or wait for your monthly refill (Places discovery still works).';
+        // Same correction as the targeted branch: say which wall, in the gate's own words. The
+        // trailing note stays, because it is true and useful — Places is billed separately.
+        limitCode = failureKind(e);
+        apiError = `${e.message} (Searching through Google's listings is billed separately and still works.)`;
       }
     }
     for (const q of scoutAllowed ? ((queries ?? []) as QRow[]) : []) {
@@ -254,7 +266,7 @@ Deno.serve(async (req) => {
     ]);
 
     return json({
-      ok: true, source, combosRun, newLeads, dupes, apiError,
+      ok: true, source, combosRun, newLeads, dupes, apiError, limitCode,
       poolTotal: pool.count ?? 0, noWebsite: noSite.count ?? 0, freshCombosLeft: remaining.count ?? 0,
     });
   } catch (e) {

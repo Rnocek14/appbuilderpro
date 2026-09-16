@@ -30,6 +30,8 @@ import { SavedAudits } from '../components/garvis/SavedAudits';
 import { profileFromScrape } from '../lib/preview/scrapeProfile';
 import { queuePitch } from '../lib/garvis/outreach';
 import { HuntReadiness } from '../components/garvis/HuntReadiness';
+import { SpendMeter, useSpendState } from '../components/garvis/SpendMeter';
+import { isLimitFailure, limitReached } from '../lib/garvis/spendLimit';
 import { cn } from '../lib/utils';
 
 type Row = FoundBusiness & { built?: { previewUrl: string; queued: boolean; email: string | null }; building?: boolean };
@@ -76,6 +78,15 @@ export default function WinClients() {
   const [savingHunt, setSavingHunt] = useState(false);
   const [runningHunt, setRunningHunt] = useState(false);
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
+  const [spend, refreshSpend] = useSpendState();
+  // A limit already reached means every button here would fail. Say so and switch them off rather
+  // than letting a press bounce off a wall nobody could see.
+  const spendStopped = !!spend && limitReached(spend) !== 'none';
+  /** A refusal by the spending limit is not a malfunction, so it never wears the word "failed". */
+  const reportFailure = (e: unknown) => {
+    const m = emsg(e);
+    toast(isLimitFailure(m) ? 'info' : 'error', m);
+  };
 
   // Load any existing daily hunt so the panel shows its live state instead of the setup form.
   useEffect(() => {
@@ -108,8 +119,8 @@ export default function WinClients() {
       };
       await Promise.all([worker(), worker(), worker()]);
       setRows((r) => [...r].sort((a, b) => (VERDICT_RANK[a.audit?.verdict ?? 'unknown'] - VERDICT_RANK[b.audit?.verdict ?? 'unknown'])));
-    } catch (e) { toast('error', emsg(e)); }
-    finally { setFinding(false); }
+    } catch (e) { reportFailure(e); }
+    finally { setFinding(false); refreshSpend(); }
   };
 
   const build = async (idx: number) => {
@@ -148,14 +159,17 @@ export default function WinClients() {
             businessName: bizName, industry, pitch, previewUrl: res.previewUrl!, toEmail: email,
           });
           queued = true;
-        } catch (e) { toast('error', emsg(e)); }
+        } catch (e) { reportFailure(e); }
       }
       setRows((r) => r.map((x, j) => (j === idx ? { ...x, built: { previewUrl: res.previewUrl!, queued, email } } : x)));
       toast('success', queued
         ? `Built ${bizName} a demo from their real site + queued the pitch — review it in the Queue.`
         : `Built ${bizName} a demo from their real site. No public email found — add one in the Queue to send.`);
-    } catch (e) { toast('error', emsg(e)); }
-    finally { setRows((r) => r.map((x, j) => (j === idx ? { ...x, building: false } : x))); }
+    } catch (e) { reportFailure(e); }
+    finally {
+      setRows((r) => r.map((x, j) => (j === idx ? { ...x, building: false } : x)));
+      refreshSpend();   // building a site is the most expensive single press here
+    }
   };
 
   // Scan ONE known URL directly (paste a prospect you already have) — audits it and drops it into the
@@ -173,7 +187,7 @@ export default function WinClients() {
       void recordProspectAudit({ url: href, audit, scrape, source: 'scan', businessName: host, niche, area });
       setScanUrl('');
       toast('success', `Scanned ${host} — ${audit.reachable ? 'audited. Press Build to make their demo.' : 'couldn’t load it; worth a manual look.'}`);
-    } catch (e) { toast('error', emsg(e)); }
+    } catch (e) { reportFailure(e); }
     finally { setScanning(false); }
   };
 
@@ -188,8 +202,14 @@ export default function WinClients() {
   // businesses into the list (capped so the page stays snappy); Build audits + rebuilds on demand.
   const sweepNationwide = async () => {
     const n = niche.trim();
-    if (!n) { toast('error', 'Enter a niche first — e.g. roofers, dentists, plumbers.'); return; }
+    if (!n) { toast('error', 'Type a kind of business first — e.g. roofers, dentists, plumbers.'); return; }
     const cities = scopeCities();
+    // THE BIGGEST SPENDER IN THE APP, and it used to start on one click with no statement of size —
+    // up to a thousand paid searches. The daily limit would have stopped it partway, which is a
+    // refund nobody wants and a run that looks broken. Say the number, get a yes.
+    if (cities.length > 25 && !window.confirm(
+      `This searches ${cities.length} cities, one paid search each, and can take a while.\n\n`
+      + `It stops by itself if it reaches your spending limit. Go ahead?`)) return;
     stopSweep.current = false;
     setSweeping(true); setSearched(true); setRows([]); setSweepProg({ done: 0, total: cities.length, found: 0, failed: 0, city: '' });
     const MAX_ROWS = 400;
@@ -201,16 +221,22 @@ export default function WinClients() {
         shouldStop: () => stopSweep.current,
       });
       const where = cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope;
-      // Honest reporting: a sweep where searches FAILED never poses as "found 0" — say why.
-      if (res.failed > 0 && res.found.length === 0) {
-        toast('error', `The sweep couldn’t search (${res.failed}/${cities.length} cities failed): ${res.lastError ?? 'unknown error'}`);
+      // Honest reporting: a search that FAILED never poses as "found 0" — say why. And a run that
+      // stopped at the spending limit is reported as having stopped, not as having failed: it did
+      // exactly what it was told to do, and calling that an error is what makes a working limit
+      // look like a broken app.
+      const stoppedByLimit = isLimitFailure(res.lastError);
+      if (stoppedByLimit) {
+        toast('info', `${res.lastError} Found ${res.found.length} before it stopped — they're in the list below.`);
+      } else if (res.failed > 0 && res.found.length === 0) {
+        toast('error', `Nothing could be searched (${res.failed} of ${cities.length} cities): ${res.lastError ?? 'no reason given'}`);
       } else if (res.failed > 0) {
-        toast('info', `Swept ${where} — found ${res.found.length} unique ${n}, but ${res.failed} cit${res.failed === 1 ? 'y' : 'ies'} failed (${res.lastError ?? 'unknown error'}).`);
+        toast('info', `Searched ${where} — found ${res.found.length} different ${n}, though ${res.failed} cit${res.failed === 1 ? 'y' : 'ies'} couldn't be searched (${res.lastError ?? 'no reason given'}).`);
       } else {
-        toast('success', `Swept ${where} — found ${res.found.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
+        toast('success', `Searched ${where} — found ${res.found.length} different ${n}. Build the weak ones a site; nothing is emailed until you approve it.`);
       }
-    } catch (e) { toast('error', emsg(e)); }
-    finally { setSweeping(false); }
+    } catch (e) { reportFailure(e); }
+    finally { setSweeping(false); refreshSpend(); }
   };
 
   // AREA STUDY SWEEP — the Area field as a town list. Distinct from the nationwide sweep in the two
@@ -245,7 +271,7 @@ export default function WinClients() {
         toast('success', `Swept ${areaLabel} — ${res.found.length} unique ${n}, ${res.audited} audited and recorded` +
           `${res.cohort ? `, filed into study “${res.cohort.name}”` : ' (study table not installed — leads still saved)'}.`);
       }
-    } catch (e) { toast('error', emsg(e)); }
+    } catch (e) { reportFailure(e); }
     finally { setSweeping(false); }
   };
 
@@ -261,7 +287,7 @@ export default function WinClients() {
       const { createAreaStudyOrder } = await import('../lib/garvis/standingRun');
       await createAreaStudyOrder({ niche: n, areaLabel, towns });
       toast('success', `Study queued: ${n} across ${towns.length} towns. The server works a slice every ~15 minutes — safe to close this tab. Results land in Studies.`);
-    } catch (e) { toast('error', emsg(e)); }
+    } catch (e) { reportFailure(e); }
   };
 
   // The chosen scope as a SweepScope (for the daily hunt config + its summary preview).
@@ -284,19 +310,19 @@ export default function WinClients() {
       toast('success', niche.trim()
         ? `Daily hunt on for "${niche.trim()}". Garvis will sweep fresh markets every day and queue pitches for your approval.`
         : 'Daily hunt on for every kind of local business. Garvis will sweep fresh markets every day and queue pitches for your approval.');
-    } catch (e) { toast('error', emsg(e)); }
+    } catch (e) { reportFailure(e); }
     finally { setSavingHunt(false); }
   };
   const toggleHunt = async () => {
     if (!hunt) return;
     const next = hunt.status === 'active' ? 'paused' : 'active';
     try { await setOrderStatus(hunt.id, next); setHunt({ ...hunt, status: next }); }
-    catch (e) { toast('error', emsg(e)); }
+    catch (e) { reportFailure(e); }
   };
   const stopHunt = async () => {
     if (!hunt) return;
     try { await deleteOrder(hunt.id); setHunt(null); toast('info', 'Daily hunt turned off.'); }
-    catch (e) { toast('error', emsg(e)); }
+    catch (e) { reportFailure(e); }
   };
   // Run the hunt RIGHT NOW (owner-scoped forced run in the worker) — same-day proof it works,
   // and the panel's honest result line refreshes from the run it just did.
@@ -308,7 +334,7 @@ export default function WinClients() {
       const os = await listOrders();
       setHunt(os.find((o) => o.id === hunt.id) ?? hunt);
       toast('success', 'Hunt ran — the result line below is from this run. Demos + pitches land in your Queue.');
-    } catch (e) { toast('error', emsg(e)); }
+    } catch (e) { reportFailure(e); }
     finally { setRunningHunt(false); }
   };
 
@@ -345,6 +371,11 @@ export default function WinClients() {
             silent app-address blocker is visible before you wonder why nothing happened. */}
         <div className="mb-4"><HuntReadiness /></div>
 
+        {/* And what it has cost you today, in the same place, for the same reason: a limit you can
+            see coming is a limit; a limit you cannot is a bug report. */}
+        <div className="mb-4 max-w-md"><SpendMeter state={spend} refresh={refreshSpend}
+          note="Each search costs a little. Searching every city costs one search per city." /></div>
+
         {/* ── THE ONE SEARCH ─────────────────────────────────────────────────
             One row, one orange button. Everything that used to sit beside it —
             the nationwide sweep, the town-list study, the URL scan, the daily
@@ -359,7 +390,7 @@ export default function WinClients() {
               aria-label="Town or area"
               onKeyDown={(e) => { if (e.key === 'Enter') void find(); }}
               className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-            <Button variant="primary" size="md" onClick={() => void find()} disabled={finding || !niche.trim()}>
+            <Button variant="primary" size="md" onClick={() => void find()} disabled={finding || !niche.trim() || spendStopped}>
               {finding ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Search
             </Button>
           </div>
@@ -380,7 +411,7 @@ export default function WinClients() {
                   aria-label="A website you already know about"
                   onKeyDown={(e) => { if (e.key === 'Enter') void scanOne(); }}
                   className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-                <Button variant="outline" size="md" onClick={() => void scanOne()} disabled={scanning || !scanUrl.trim()}>
+                <Button variant="outline" size="md" onClick={() => void scanOne()} disabled={scanning || !scanUrl.trim() || spendStopped}>
                   {scanning ? <Loader2 size={15} className="animate-spin" /> : <Globe size={15} />} Check this one site
                 </Button>
               </div>
@@ -402,7 +433,7 @@ export default function WinClients() {
                     <Square size={13} /> Stop searching
                   </Button>
                 ) : (
-                  <Button variant="outline" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim()}>
+                  <Button variant="outline" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim() || spendStopped}>
                     <Radar size={15} /> Search all those cities
                   </Button>
                 )}
@@ -569,7 +600,7 @@ export default function WinClients() {
                               </NavLink>
                             </div>
                           ) : (
-                            <Button variant="primary" size="sm" aria-label={`Build a website for ${b.name}`} onClick={() => void build(i)} disabled={b.building || !b.url}>
+                            <Button variant="primary" size="sm" aria-label={`Build a website for ${b.name}`} onClick={() => void build(i)} disabled={b.building || !b.url || spendStopped}>
                               {b.building ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Build their site
                             </Button>
                           )}

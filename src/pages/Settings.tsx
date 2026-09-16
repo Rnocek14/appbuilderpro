@@ -231,7 +231,7 @@ function SpendGuardCard() {
     const { data: sess } = await supabase.auth.getUser();
     if (!sess.user) return;
     const d = Number(patch.daily ?? daily), m = Number(patch.monthly ?? monthly);
-    if (!Number.isFinite(d) || d < 0 || !Number.isFinite(m) || m < 0) { toast('error', 'Caps must be zero or positive dollars.'); return; }
+    if (!Number.isFinite(d) || d < 0 || !Number.isFinite(m) || m < 0) { toast('error', 'A limit has to be a dollar amount of zero or more.'); return; }
     setSaving(true);
     const { error } = await supabase.from('spend_guard').upsert({
       owner_id: sess.user.id, daily_cap_usd: d, monthly_cap_usd: m,
@@ -239,50 +239,61 @@ function SpendGuardCard() {
     }, { onConflict: 'owner_id' });
     setSaving(false);
     if (error) { toast('error', error.message); return; }
-    toast('success', patch.kill === undefined ? 'Caps saved — every AI call checks them before spending.' : (patch.kill ? 'KILL SWITCH ON — nothing spends until you flip it back.' : 'Kill switch off — spending resumes under your caps.'));
+    toast('success', patch.kill === undefined
+      ? 'Saved. Every AI call checks these before it spends anything.'
+      : (patch.kill ? 'Spending is off. Nothing will run until you turn it back on.' : 'Spending is on again, under the limits above.'));
     void load();
   };
 
+  // Where each key is set, and what it switches on. The first row used to say "supabase secrets
+  // set …" for the key that decides whether ANYTHING works — a command line, for the one thing an
+  // owner is most likely to be missing. Start here sets it from a field now, so that is what this
+  // says. The rows that genuinely still need the CLI keep saying so.
   const KEYS: { name: string; where: string; unlocks: string }[] = [
-    { name: 'AI_PROVIDER + AI_MODEL + *_API_KEY', where: 'supabase secrets set …', unlocks: 'every generative feature (scripts, chat, workers)' },
-    { name: 'OPENAI_API_KEY', where: 'supabase secrets set …', unlocks: 'scene illustrations (gpt-image-1) + TTS voiceover' },
-    { name: 'SHOTSTACK_API_KEY', where: 'supabase secrets set …', unlocks: 'mp4 rendering' },
-    { name: 'ELEVENLABS_API_KEY (optional)', where: 'supabase secrets set …', unlocks: 'premium voice head' },
-    { name: 'Ayrshare key + Profile-Keys', where: 'Settings → Connections', unlocks: 'real social posting + analytics (the learning loop)' },
+    { name: 'Your Claude key', where: 'Start here, step 2', unlocks: 'everything that writes — drafts, sites, searches, replies' },
+    { name: 'OPENAI_API_KEY', where: 'supabase secrets set …', unlocks: 'pictures for scenes, and spoken narration' },
+    { name: 'SHOTSTACK_API_KEY', where: 'supabase secrets set …', unlocks: 'turning a storyboard into an actual video file' },
+    { name: 'ELEVENLABS_API_KEY (optional)', where: 'supabase secrets set …', unlocks: 'a better-sounding voice for narration' },
+    { name: 'Ayrshare key + Profile-Keys', where: 'Settings → Connections', unlocks: 'posting to social accounts, and reading the numbers back' },
   ];
 
   return (
     <Card className="mt-4 p-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-forge-ink">Spending guard</p>
-          <p className="mt-1 text-xs text-forge-dim">
-            Hard caps on REAL provider spend, checked server-side before every AI call — at the cap,
-            calls refuse with the reason until the UTC window resets. Numbers below are the actual
-            usage ledger, not estimates.
+        <div id="spending" className="scroll-mt-6">
+          <p className="text-sm font-medium text-forge-ink">What this is allowed to spend</p>
+          <p className="mt-1 max-w-xl text-xs text-forge-dim">
+            The most real money this app may spend on your behalf. It is checked before every single
+            AI call, so it cannot be gone around — when a limit is reached, things stop and say so.
+            The figures below are what was actually charged, not a guess. Screens that spend show the
+            same numbers next to their buttons, so you see a limit coming rather than meeting it.
           </p>
         </div>
         {state && (
           <p className="shrink-0 text-right text-xs text-forge-dim">
-            today <span className="font-mono text-forge-ink">${Number(state.spent_today).toFixed(2)}</span> / ${Number(state.daily_cap).toFixed(0)}
-            <br />month <span className="font-mono text-forge-ink">${Number(state.spent_month).toFixed(2)}</span> / ${Number(state.monthly_cap).toFixed(0)}
+            today <span className="font-mono text-forge-ink">${Number(state.spent_today).toFixed(2)}</span> of ${Number(state.daily_cap).toFixed(0)}
+            <br />this month <span className="font-mono text-forge-ink">${Number(state.spent_month).toFixed(2)}</span> of ${Number(state.monthly_cap).toFixed(0)}
           </p>
         )}
       </div>
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
-        <label className="text-xs text-forge-dim">Daily cap ($)
-          <Input value={daily} onChange={(e) => setDaily(e.target.value)} className="mt-1 w-28" />
+        <label className="text-xs text-forge-dim">Most per day ($)
+          <Input value={daily} onChange={(e) => setDaily(e.target.value)} className="mt-1 w-28" aria-label="Most it may spend in a day, in dollars" />
         </label>
-        <label className="text-xs text-forge-dim">Monthly cap ($)
-          <Input value={monthly} onChange={(e) => setMonthly(e.target.value)} className="mt-1 w-28" />
+        <label className="text-xs text-forge-dim">Most per month ($)
+          <Input value={monthly} onChange={(e) => setMonthly(e.target.value)} className="mt-1 w-28" aria-label="Most it may spend in a month, in dollars" />
         </label>
-        <Button size="sm" onClick={() => void save({})} disabled={saving || !state}>Save caps</Button>
+        <Button size="sm" onClick={() => void save({})} disabled={saving || !state}>Save these limits</Button>
         <Button size="sm" variant={state?.kill ? 'primary' : 'ghost'} onClick={() => void save({ kill: !state?.kill })} disabled={saving || !state}>
-          {state?.kill ? 'KILL SWITCH: ON — click to resume' : 'Kill switch: off'}
+          {state?.kill ? 'Spending is OFF — turn it back on' : 'Stop all spending now'}
         </Button>
       </div>
-      {!state && <p className="mt-3 text-xs text-forge-dim">Guard not reachable yet — apply migration app_0127 (re-paste the bundle) first.</p>}
+      <p className="mt-2 text-[11px] text-forge-dim">
+        A day runs to midnight UTC and a month to the 1st. Setting a limit to 0 removes it — there
+        would then be nothing stopping a long run.
+      </p>
+      {!state && <p className="mt-3 text-xs text-forge-dim">These limits can't be read yet — the database hasn't had app_0127 applied.</p>}
 
       <p className="mt-5 text-sm font-medium text-forge-ink">Where your API keys live</p>
       <table className="mt-2 w-full text-xs">

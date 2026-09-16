@@ -28,6 +28,8 @@ import { loadProspects, setProspectStatus, type Prospect } from '../lib/garvis/p
 import { buildDemoForReview } from '../lib/garvis/prospects/reviewSend';
 import { STAGE_LADDER, STAGE_META, stageRollup, signalChips, type ProspectStage } from '../lib/garvis/prospects/stage';
 import { ProspectDrawer } from '../components/prospects/ProspectDrawer';
+import { SpendMeter, useSpendState } from '../components/garvis/SpendMeter';
+import { readInvokeFailure, limitReached } from '../lib/garvis/spendLimit';
 
 type Filter = 'all' | ProspectStage;
 
@@ -42,7 +44,11 @@ export default function Leads() {
   const [building, setBuilding] = useState(false);
   const [buildMsg, setBuildMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [spend, refreshSpend] = useSpendState();
   const stopRef = useRef(false);
+  // Pressing into a wall is the thing this page was doing. When the limit is already reached the
+  // button is off and the meter says why, instead of a press that fails and reads like a fault.
+  const spendStopped = !!spend && limitReached(spend) !== 'none';
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -52,23 +58,39 @@ export default function Leads() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  // FIND BUSINESSES. Claude searches the web across business types and towns, judges each one's website,
-  // and saves the real ones here — no Google account to set up. Each round is a metered call, so the loop
-  // runs in small batches and pauses after a bounded run; pressing the button again keeps going.
-  const MAX_ROUNDS = 60;
+  // FIND BUSINESSES. Claude searches the web across business types and towns, judges each one's
+  // website, and saves the real ones here — no Google account to set up.
+  //
+  // EVERY ROUND COSTS REAL MONEY. This loop used to run up to 60 rounds of 2 searches — as many as
+  // 120 metered Claude calls from ONE press, with nothing on screen saying so. The daily limit did
+  // hold, but you met it blind and were then told to upgrade your plan, which had nothing to do with
+  // it. Ten rounds is roughly twenty searches: enough to fill a useful list in one go, small enough
+  // that nobody presses this by accident and regrets it. Pressing again picks up where it left off,
+  // and the meter above the button says what has gone so far.
+  const MAX_ROUNDS = 10;
+  const SEARCHES_PER_ROUND = 2;
   const findBusinesses = async () => {
     setSearching(true); stopRef.current = false; setSearchMsg('Looking for businesses…');
     let added = 0; let areas = 0; let i = 0;
     try {
       for (; i < MAX_ROUNDS && !stopRef.current; i++) {
-        const { data, error } = await supabase.functions.invoke('discover-run', { body: { batch: 2, source: 'claude' } });
-        const d = data as { ok?: boolean; combosRun?: number; newLeads?: number; poolTotal?: number; noWebsite?: number; freshCombosLeft?: number; apiError?: string; error?: string } | null;
+        const { data, error } = await supabase.functions.invoke('discover-run', { body: { batch: SEARCHES_PER_ROUND, source: 'claude' } });
+        const d = data as { ok?: boolean; combosRun?: number; newLeads?: number; poolTotal?: number; noWebsite?: number; freshCombosLeft?: number; apiError?: string; error?: string; limitCode?: string } | null;
         if (error || !d?.ok) {
-          setSearchMsg(d?.error ?? 'The search could not run. Open “Start here” and add your Claude key — that key is what does the searching.');
+          // READ THE ENVELOPE. supabase-js reports every non-2xx as "returned a non-2xx status
+          // code" and hides the function's real answer on error.context, so this used to fall
+          // through to "add your Claude key" — sending someone to fix a key that was fine when
+          // what had actually happened was their own spending limit doing its job.
+          const f = await readInvokeFailure(error, data, 'The search could not run. Open “Start here” and add your Claude key — that key is what does the searching.');
+          setSearchMsg(f.message);
           break;
         }
         if (d.apiError) {
-          setSearchMsg(`The search was refused: ${d.apiError.slice(0, 90)}. Check your Claude key under “Start here”, then press Find businesses again.`);
+          // A limit is not a rejected key. Saying "check your Claude key" to someone who has simply
+          // spent today's allowance is how a working guard gets mistaken for a broken app.
+          setSearchMsg(d.limitCode && d.limitCode !== 'none'
+            ? d.apiError
+            : `The search was refused: ${d.apiError.slice(0, 120)} Check your Claude key under “Start here”, then press Find businesses again.`);
           break;
         }
         added += d.newLeads ?? 0; areas += d.combosRun ?? 0;
@@ -78,9 +100,10 @@ export default function Leads() {
           break;
         }
       }
-      if (i >= MAX_ROUNDS && !stopRef.current) setSearchMsg(`Paused after searching ${areas} areas and finding ${added}. Press Find businesses again to keep going.`);
+      if (i >= MAX_ROUNDS && !stopRef.current) setSearchMsg(`Stopped on purpose after ${areas} searches, having found ${added}. Press Find businesses again to do another ${MAX_ROUNDS * SEARCHES_PER_ROUND}.`);
     } catch (e) { setSearchMsg(e instanceof Error ? e.message : 'The search stopped unexpectedly.'); }
     setSearching(false);
+    refreshSpend();     // the meter must reflect what this press just cost, not what it cost before
     await load();
   };
 
@@ -100,6 +123,7 @@ export default function Leads() {
       setBuildMsg({ tone: 'err', text: e instanceof Error ? e.message : `We couldn't build a site for ${p.company_name}.` });
     }
     setBuilding(false);
+    refreshSpend();     // building a site is the most expensive thing on this page
     await load();
   };
 
@@ -151,8 +175,9 @@ export default function Leads() {
         <Square size={14} /> Stop searching
       </button>
     ) : (
-      <button onClick={() => void findBusinesses()}
-        className={cn('inline-flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5',
+      <button onClick={() => void findBusinesses()} disabled={spendStopped}
+        title={spendStopped ? "You've reached your spending limit — nothing would run." : `Does about ${MAX_ROUNDS * SEARCHES_PER_ROUND} searches, then stops on its own.`}
+        className={cn('inline-flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-45',
           primary ? 'bg-forge-ember text-forge-bg shadow' : 'border border-forge-border text-forge-ink hover:border-forge-ember/50')}>
         <Search size={14} /> Find businesses
       </button>
@@ -204,6 +229,10 @@ export default function Leads() {
                 </span>
               )}
             </div>
+            <div className="mt-3 max-w-md">
+              <SpendMeter state={spend} refresh={refreshSpend}
+                note={`One press does about ${MAX_ROUNDS * SEARCHES_PER_ROUND} searches and then stops on its own.`} />
+            </div>
           </div>
         ) : (
           <div className="rounded-2xl border border-forge-ember/30 bg-forge-panel/40 p-4">
@@ -231,7 +260,7 @@ export default function Leads() {
                       <Mail size={15} /> Read what we wrote
                     </button>
                   ) : (
-                    <button onClick={() => void buildFor(nextUp)} disabled={building}
+                    <button onClick={() => void buildFor(nextUp)} disabled={building || spendStopped}
                       className="inline-flex items-center gap-2 rounded-lg bg-forge-ember px-3.5 py-2 text-sm font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-60">
                       {building
                         ? <><Loader2 size={15} className="animate-spin" /> Building their website…</>
@@ -256,6 +285,12 @@ export default function Leads() {
                 {buildMsg?.text ?? searchMsg}
               </p>
             )}
+            {/* What this has cost today, on the page BEFORE the press — so the limit is never the
+                first you hear of it. */}
+            <div className="mt-3 max-w-md">
+              <SpendMeter state={spend} refresh={refreshSpend}
+                note={`One search press does about ${MAX_ROUNDS * SEARCHES_PER_ROUND} searches and then stops on its own.`} />
+            </div>
           </div>
         )}
 

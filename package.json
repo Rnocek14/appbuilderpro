@@ -160,6 +160,7 @@
     "verify:autonomygrants": "tsx src/lib/garvis/autonomy.verify.ts",
     "verify:ics": "tsx src/lib/garvis/ics.verify.ts",
     "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts",
+    "verify:spendlimit": "tsx supabase/functions/_shared/spendLimitCore.verify.ts",
     "scan:probe": "tsx scripts/scanProbe/probe.ts",
     "scan:live": "tsx scripts/scanProbe/live.ts",
     "verify:a11yscan": "tsx supabase/functions/_shared/a11yScan.verify.ts",

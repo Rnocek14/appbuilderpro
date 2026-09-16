@@ -125,3 +125,62 @@ begin;
     perform t('B cannot retrieve A''s vectors via match_embeddings', true, 'errored: '||left(SQLERRM,40));
   end $$;
 rollback;
+
+-- 8. THE SPENDING LIMIT (app_0142): spend_guard_state is SECURITY DEFINER over usage_events, which
+--    is service-write. Before app_0142 it took any id and answered, and PUBLIC holds EXECUTE on a
+--    new function by default — so the anon key could total up anybody's spending. Four cases.
+begin;
+  set local role authenticated;
+  set local request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+  do $$
+  declare v jsonb;
+  begin
+    begin
+      select public.spend_guard_state('11111111-1111-1111-1111-111111111111'::uuid) into v;
+      perform t('B cannot read A''s spending', false, 'ALLOWED — returned '||left(coalesce(v::text,'null'),40));
+    exception when others then
+      perform t('B cannot read A''s spending', true, 'blocked: '||left(SQLERRM,44));
+    end;
+    -- ...and the owner still gets their own, or the meter on every spending screen shows nothing.
+    begin
+      select public.spend_guard_state('22222222-2222-2222-2222-222222222222'::uuid) into v;
+      perform t('B CAN read their own spending', v ? 'daily_cap', 'daily_cap='||coalesce(v->>'daily_cap','?'));
+      -- The safer default only lands for owners who never chose one; an explicit row wins.
+      perform t('an owner with no row gets the $5/day default', (v->>'daily_cap')::numeric = 5, 'got '||(v->>'daily_cap'));
+      perform t('an owner with no row gets the $50/month default', (v->>'monthly_cap')::numeric = 50, 'got '||(v->>'monthly_cap'));
+    exception when others then
+      perform t('B CAN read their own spending', false, 'errored: '||left(SQLERRM,44));
+    end;
+  end $$;
+rollback;
+
+-- An anonymous caller has a NULL uid, which a plain "uid is not null and uid <> p_user" would have
+-- waved straight through. This is the case the check is actually for.
+begin;
+  set local role authenticated;
+  set local request.jwt.claim.sub = '';
+  do $$
+  declare v jsonb;
+  begin
+    select public.spend_guard_state('11111111-1111-1111-1111-111111111111'::uuid) into v;
+    perform t('an anonymous caller cannot read anyone''s spending', false, 'ALLOWED');
+  exception when others then
+    perform t('an anonymous caller cannot read anyone''s spending', true, 'blocked: '||left(SQLERRM,44));
+  end $$;
+rollback;
+
+-- The service role must still be able to ask on an owner's behalf — that is how checkCredits, the
+-- gate every AI call passes through, reads the limit in the first place. Rolled back with the tx.
+begin;
+  create or replace function auth.role() returns text language sql stable as $$ select 'service_role'::text $$;
+  set local role authenticated;
+  set local request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+  do $$
+  declare v jsonb;
+  begin
+    select public.spend_guard_state('11111111-1111-1111-1111-111111111111'::uuid) into v;
+    perform t('the service role CAN still read an owner''s limit', v ? 'daily_cap', 'daily_cap='||coalesce(v->>'daily_cap','?'));
+  exception when others then
+    perform t('the service role CAN still read an owner''s limit', false, 'BLOCKED — the gate would fail open: '||left(SQLERRM,40));
+  end $$;
+rollback;
