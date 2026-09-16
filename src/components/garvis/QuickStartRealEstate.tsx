@@ -77,7 +77,7 @@ export function QuickStartRealEstate({ onToast }: { onToast: (k: 'success' | 'er
           <p className="mt-1 text-sm text-forge-dim">
             {opening
               ? 'Your communities, their verified facts, and the next post — it opens straight on the Campaign Studio.'
-              : 'Five areas, not twenty. It opens on the Campaign Studio: keep a community\u2019s facts with their sources, draft a post only from the ones still good, approve it, and see the inquiry it caused.'}
+              : 'Keep what is true about a community, with where each fact came from. Write a post using only the facts that are still good, read it, approve it, and see which enquiry it brought in.'}
           </p>
           <Button variant='primary' size='md' onClick={() => void start()} disabled={busy} className="mt-3">
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Building2 size={15} />}
