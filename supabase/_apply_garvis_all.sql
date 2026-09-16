@@ -7804,9 +7804,20 @@ create index if not exists idx_leads_post on public.leads(post_id) where post_id
 -- ---------- a booked meeting can become an outcome ----------
 -- appointments (app_0109) stores customer_name/email/phone with no CRM link, so a booking never joins
 -- the person it belongs to.
-alter table public.appointments add column if not exists lead_id    uuid references public.leads(id) on delete set null;
-alter table public.appointments add column if not exists contact_id uuid references public.contacts(id) on delete set null;
-create index if not exists idx_appointments_lead on public.appointments(lead_id) where lead_id is not null;
+--
+-- GUARDED, because a live project may not have it. This migration failed on exactly that: the
+-- deployed database never received app_0109, so `alter table public.appointments` took down the
+-- whole file — and with it the campaign links, the phone-only inquiry and the outcomes table, none
+-- of which have anything to do with booking. Additive and idempotent has to mean "applies to the
+-- database that is actually there". The booking link switches itself on if app_0109 ever lands.
+do $$
+begin
+  if to_regclass('public.appointments') is not null then
+    alter table public.appointments add column if not exists lead_id    uuid references public.leads(id) on delete set null;
+    alter table public.appointments add column if not exists contact_id uuid references public.contacts(id) on delete set null;
+    create index if not exists idx_appointments_lead on public.appointments(lead_id) where lead_id is not null;
+  end if;
+end $$;
 
 -- ---------- outcomes ----------
 -- attribution 'unknown' is a FIRST-CLASS value. The operating plan is explicit that attribution must
@@ -7818,7 +7829,7 @@ create table if not exists public.re_outcomes (
   world_id       uuid references public.knowledge_worlds(id) on delete set null,
   lead_id        uuid references public.leads(id) on delete set null,
   campaign_id    uuid references public.marketing_campaigns(id) on delete set null,
-  appointment_id uuid references public.appointments(id) on delete set null,
+  appointment_id uuid,
   kind           text not null
                    check (kind in ('qualified_conversation', 'appointment_set', 'appointment_held',
                                    'listing_signed', 'closed', 'lost')),
@@ -7839,6 +7850,20 @@ create policy "re_outcomes owner all" on public.re_outcomes
   );
 create index if not exists idx_re_outcomes_world on public.re_outcomes(world_id, occurred_on desc);
 create index if not exists idx_re_outcomes_campaign on public.re_outcomes(campaign_id, kind) where campaign_id is not null;
+
+-- The appointment link, added as a constraint rather than declared inline, for the same reason as
+-- above: an inline reference makes the whole CREATE TABLE fail where booking was never installed.
+-- Named explicitly so the "already added" check is exact rather than a guess at Postgres's
+-- auto-generated name.
+do $$
+begin
+  if to_regclass('public.appointments') is not null
+     and not exists (select 1 from pg_constraint where conname = 're_outcomes_appointment_fk') then
+    alter table public.re_outcomes
+      add constraint re_outcomes_appointment_fk
+      foreign key (appointment_id) references public.appointments(id) on delete set null;
+  end if;
+end $$;
 
 -- ======== supabase/migrations/app_0142_spend_limit_defaults.sql ========
 -- app_0142_spend_limit_defaults.sql — SAFER DEFAULTS FOR THE SPENDING LIMIT, and a guard state that
