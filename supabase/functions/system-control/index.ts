@@ -30,6 +30,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { getConnection } from '../_shared/connections.ts';
+import { publicOriginProblem, normalizeOrigin } from '../_shared/appOriginCore.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 
@@ -92,6 +93,17 @@ Deno.serve(async (req) => {
       }
       if (!value.trim()) return json({ error: 'Paste the key\u2019s value \u2014 an empty value would switch the feature off.' }, 400);
 
+      // APP_ORIGIN IS THE ONE WHOSE WRONG VALUE IS WORSE THAN ITS MISSING ONE. It is the base of the
+      // demo link inside a cold email to a real business. Unset, standing-worker refuses to queue any
+      // pitch and nothing goes out. Set to a laptop address, every check reports ready and every
+      // recipient gets a link to their own machine — and the only person who cannot see that is the
+      // one who set it. Refused here as well as in the browser, because the browser is not the only
+      // way to reach this action.
+      if (name === 'APP_ORIGIN') {
+        const problem = publicOriginProblem(value);
+        if (problem) return json({ error: problem, field: 'APP_ORIGIN' }, 400);
+      }
+
       const conn = await getConnection(admin, user.id, 'supabase');
       if (!conn?.access_token) {
         return json({
@@ -110,7 +122,7 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { Authorization: `Bearer ${conn.access_token}`, 'content-type': 'application/json' },
         signal: AbortSignal.timeout(20_000),
-        body: JSON.stringify([{ name, value }]),
+        body: JSON.stringify([{ name, value: name === 'APP_ORIGIN' ? normalizeOrigin(value) : value }]),
       });
       if (!res.ok) {
         const detail = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 240);

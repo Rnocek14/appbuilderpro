@@ -30,6 +30,7 @@ import {
   type SystemStatus,
 } from '../lib/garvis/systemControl';
 import { fetchHuntReadiness } from '../lib/garvis/huntReadinessRun';
+import { publicOriginProblem } from '../../supabase/functions/_shared/appOriginCore';
 import type { Readiness } from '../lib/garvis/huntReadiness';
 
 /** A key, described by what it switches on rather than by its variable name.
@@ -108,7 +109,13 @@ const STEPS: StepDef[] = [
         dark: 'Sites still get built, and the email that should show them off is never written — silently. This is the quiet one that makes the app look broken.',
         where: null,
         placeholder: 'https://your-app.example.com',
-        suggest: { label: 'Use the address I’m on', value: () => window.location.origin },
+        // OFFERED ONLY WHEN IT IS USABLE. This button read "Use the address I'm on", which on a
+        // laptop is http://localhost:5173 — an address that makes every readiness light go green
+        // while mailing a dead link to a real business. Running locally there is no honest
+        // suggestion to make, so none is offered and the field explains why.
+        suggest: publicOriginProblem(typeof window === 'undefined' ? '' : window.location.origin)
+          ? undefined
+          : { label: 'Use the address I am on', value: () => window.location.origin },
       },
       {
         env: 'WORKER_SECRET',
@@ -202,6 +209,11 @@ export default function Start() {
   const save = async (k: KeyDef) => {
     const v = (values[k.env] ?? '').trim();
     if (!v) { toast('info', `Paste the ${k.label} first.`); return; }
+    // Caught here as well as server-side, so the answer is instant and the wording is identical.
+    if (k.env === 'APP_ORIGIN') {
+      const problem = publicOriginProblem(v);
+      if (problem) { toast('error', problem); return; }
+    }
     setSaving(k.env);
     try {
       const { note } = await setSecret(k.env, v);
@@ -332,6 +344,17 @@ export default function Start() {
                       : <span className="rounded-full bg-forge-ember/15 px-2 py-0.5 text-[11px] font-medium text-forge-ember">not set</span>}
                   </div>
                   {k.vendor && <p className="mt-0.5 text-[11px] text-forge-dim/70">{k.vendor}</p>}
+                  {/* Running on a laptop, there is no address to offer and the reason matters more
+                      than the missing button: leaving this blank is the SAFE state, because unset
+                      refuses to queue a pitch at all while a local value mails a dead link. */}
+                  {k.env === 'APP_ORIGIN' && typeof window !== 'undefined' && publicOriginProblem(window.location.origin) && (
+                    <p className="mt-1 rounded-lg border border-forge-warn/40 bg-forge-warn/[0.06] px-2 py-1.5 text-[11px] text-forge-warn">
+                      You are opening this app at <span className="font-mono">{window.location.origin}</span>, which only
+                      works on this computer — so there is nothing to suggest here. Leave it blank until the app has a
+                      real web address. Blank is the safe setting: no pitch is written at all, rather than one carrying
+                      a link nobody else can open.
+                    </p>
+                  )}
                   <p className="mt-1 text-xs text-forge-dim">
                     <span className="text-forge-dim/80">Without it: </span>{k.dark}
                   </p>
