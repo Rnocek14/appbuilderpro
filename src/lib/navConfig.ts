@@ -33,8 +33,10 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/command', label: 'Home', icon: Sparkles },
       // The content-channel daily loop: every growth world, its channels, and the one-click start.
       { to: '/garvis/channels', label: 'Channels', icon: Film },
-      // The swift-prep screen: the prospect list + one-click Build & send (and the Claude scrape).
-      { to: '/garvis/leads', label: 'Prospects', icon: Target },
+      // The daily selling screen. Renamed from "Prospects": the door has to say what is behind it, and
+      // "Prospects" named a category of record rather than the work. It is now the same words the page
+      // itself uses — find local businesses with bad websites, build them one, email them.
+      { to: '/garvis/leads', label: 'Businesses to pitch', icon: Target },
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
       { to: '/garvis/client-book', label: 'Clients', icon: BookUser },
     ],

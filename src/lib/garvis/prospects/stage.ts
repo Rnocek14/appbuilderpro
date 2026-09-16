@@ -19,11 +19,11 @@ export interface StageMeta {
 }
 
 export const STAGE_META: Record<ProspectStage, StageMeta> = {
-  new:     { label: 'New',     color: 'text-forge-ember', dot: 'bg-forge-ember', next: 'Build the demo + send the pitch' },
-  built:   { label: 'Built',   color: 'text-forge-warn',  dot: 'bg-forge-warn',  next: 'Demo is ready — no email found yet; add one or send' },
-  pitched: { label: 'Pitched', color: 'text-forge-heat',  dot: 'bg-forge-heat',  next: 'Pitched — follow up, or mark it won' },
-  won:     { label: 'Won',     color: 'text-forge-ok',    dot: 'bg-forge-ok',    next: 'Won — set up their accounts' },
-  skipped: { label: 'Skipped', color: 'text-forge-dim',   dot: 'bg-forge-dim',   next: 'Passed over — reopen to work it again' },
+  new:     { label: 'Not started',  color: 'text-forge-ember', dot: 'bg-forge-ember', next: 'Build them a site and write the email' },
+  built:   { label: 'Site built',   color: 'text-forge-warn',  dot: 'bg-forge-warn',  next: 'Their site is built — read the email before it goes' },
+  pitched: { label: 'Email sent',   color: 'text-forge-heat',  dot: 'bg-forge-heat',  next: 'Email sent — waiting to hear back' },
+  won:     { label: 'Paying you',   color: 'text-forge-ok',    dot: 'bg-forge-ok',    next: 'They bought — set up their account' },
+  skipped: { label: 'Passed over',  color: 'text-forge-dim',   dot: 'bg-forge-dim',   next: 'You passed on this one — reopen it to work it again' },
 };
 
 export interface StageInputs {
@@ -56,8 +56,8 @@ export function stageRollup(stages: ProspectStage[]): Record<ProspectStage, numb
   return counts;
 }
 
-/** Whether a prospect at this stage can still be built/pitched with one click (New or Built), i.e. the
- *  "Build & send" action still applies. Pitched/Won/Skipped no longer show it as the primary action. */
+/** Whether there is still a site to build / an email to write for this business (Not started or Site
+ *  built). Once the email is sent, they are paying, or you passed, building is no longer the next move. */
 export function canBuildAndSend(stage: ProspectStage): boolean {
   return stage === 'new' || stage === 'built';
 }
@@ -71,8 +71,8 @@ export interface SignalChip { label: string; tone: 'ok' | 'heat' }
  *  no activity yet, so the strip stays quiet until something actually happens. Pure + deterministic. */
 export function signalChips(s: SignalFlags): SignalChip[] {
   const chips: SignalChip[] = [];
-  if (s.replied) chips.push({ label: 'replied', tone: 'ok' });
-  if (s.opened) chips.push({ label: s.openCount > 1 ? `opened ${s.openCount}×` : 'opened', tone: 'heat' });
-  if (s.demoViews > 0) chips.push({ label: s.demoViews > 1 ? `viewed ${s.demoViews}×` : 'viewed demo', tone: 'heat' });
+  if (s.replied) chips.push({ label: 'wrote back', tone: 'ok' });
+  if (s.opened) chips.push({ label: s.openCount > 1 ? `opened the email ${s.openCount} times` : 'opened the email', tone: 'heat' });
+  if (s.demoViews > 0) chips.push({ label: s.demoViews > 1 ? `looked at the site ${s.demoViews} times` : 'looked at the site', tone: 'heat' });
   return chips;
 }
