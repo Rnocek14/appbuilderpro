@@ -311,7 +311,11 @@ jobs:
             if [ "$code" = "404" ]; then echo "::error::$fn NOT deployed (404)"; fail=1; else echo "$fn: $code (live)"; fi
           done
           echo "— table probes (migration drift) —"
-          q="select to_regclass('public.standing_orders') is not null as standing_orders, to_regclass('public.discovered_businesses') is not null as lead_pool, to_regclass('public.prospect_audits') is not null as audits, to_regclass('public.automation_triggers') is not null as automations, to_regclass('public.client_subscriptions') is not null as billing, to_regclass('public.preview_sites') is not null as demos;"
+          # The probe list had not been touched in ~30 migrations, so a deploy could report success
+          # while the newest tables were absent — and it did: app_0141 failed against a database
+          # missing `appointments` and nothing here would have noticed the gap it left. Each entry
+          # is the table a feature dies without, so a `false` names the broken feature directly.
+          q="select to_regclass('public.standing_orders') is not null as standing_orders, to_regclass('public.discovered_businesses') is not null as lead_pool, to_regclass('public.prospect_audits') is not null as audits, to_regclass('public.automation_triggers') is not null as automations, to_regclass('public.client_subscriptions') is not null as billing, to_regclass('public.preview_sites') is not null as demos, to_regclass('public.re_facts') is not null as re_facts, to_regclass('public.re_communities') is not null as re_communities, to_regclass('public.post_versions') is not null as post_versions, to_regclass('public.re_outcomes') is not null as re_outcomes, to_regclass('public.spend_guard') is not null as spend_limit, to_regclass('public.appointments') is not null as booking;"
           body=$(jq -n --arg q "$q" '{query:$q}')
           curl -s -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
