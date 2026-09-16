@@ -34,14 +34,22 @@ else
   echo "   (no OPENAI_API_KEY provided — words will work; image/logo generation stays honestly off)"
 fi
 
-echo "→ 2/3 deploying the AI-facing edge functions…"
-for fn in board-copy generate-image inbox-draft standing-worker; do
-  echo "   deploying ${fn}…"
-  npx -y supabase@latest functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt
-done
+# THE WHOLE FLEET, not a hand-picked four. This loop used to name board-copy, generate-image,
+# inbox-draft and standing-worker — which was most of the AI layer when it was written and is now
+# four functions out of seventy. Anyone running this script to "go live" deployed a twentieth of
+# the app and had no way to know. The curated lists in package.json are the single source of truth
+# (the same two the Deploy Supabase workflow uses), so this can no longer drift behind them.
+echo "→ 2/3 deploying every edge function…"
+npm run functions:deploy -- --project-ref "$PROJECT_REF"
+npm run functions:deploy:webhooks -- --project-ref "$PROJECT_REF"
 
-echo "→ 3/3 the heartbeat"
+echo "→ 3/3 migrations + the heartbeat"
 cat <<'EOF'
+   MIGRATIONS are not applied by this script. Either run the "Deploy Supabase" GitHub Action with
+   mode=full (it applies them through the management API with the same access token), or paste
+   supabase/_apply_garvis_all.sql into the SQL editor. Every migration is additive and idempotent,
+   so re-applying the whole file is safe.
+
    The 15-minute clock (garvis-standing-tick) drives auto-ideas, batch sends, reminders,
    and watchers. If it isn't armed yet, open Garvis → Settings → the heartbeat panel and
    arm it there (it self-reports if it has never ticked), or apply migration

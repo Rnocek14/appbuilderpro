@@ -160,6 +160,7 @@
     "verify:autonomygrants": "tsx src/lib/garvis/autonomy.verify.ts",
     "verify:ics": "tsx src/lib/garvis/ics.verify.ts",
     "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts",
+    "verify:spendlimit": "tsx supabase/functions/_shared/spendLimitCore.verify.ts",
     "scan:probe": "tsx scripts/scanProbe/probe.ts",
     "scan:live": "tsx scripts/scanProbe/live.ts",
     "verify:a11yscan": "tsx supabase/functions/_shared/a11yScan.verify.ts",
@@ -189,7 +190,14 @@
     "verify:masterplan": "tsx src/lib/garvis/masterPlan.verify.ts",
     "verify:briefing": "tsx src/lib/garvis/briefing.verify.ts",
     "verify:conversationmemory": "tsx src/lib/garvis/conversationMemory.verify.ts",
-    "verify:projectdigest": "tsx src/lib/garvis/projectDigest.verify.ts"
+    "verify:projectdigest": "tsx src/lib/garvis/projectDigest.verify.ts",
+    "verify:postversion": "tsx src/lib/garvis/postVersion.verify.ts",
+    "verify:reschedule": "tsx src/lib/garvis/reSchedule.verify.ts",
+    "verify:refacts": "tsx src/lib/garvis/reFacts.verify.ts",
+    "verify:publishgate": "tsx src/lib/garvis/publishGate.verify.ts",
+    "verify:reconcile": "tsx src/lib/garvis/reconcile.verify.ts",
+    "verify:redraft": "tsx src/lib/garvis/reDraft.verify.ts",
+    "verify:reattribution": "tsx src/lib/garvis/reAttribution.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

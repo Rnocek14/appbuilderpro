@@ -8,12 +8,28 @@
 //   arm    → runs garvis_arm_heartbeat(functions_base, worker_secret) — the one-time call that
 //            schedules all 9 unattended jobs and was previously documented only in a migration
 //            comment. Idempotent: re-arming re-schedules with the new URL/secret.
+//   set    → SETS an edge secret from inside the app, through the Supabase Management API.
+//
+// WHY `set` EXISTS: the platform survey found that three secrets decide whether anything at all
+// happens — the AI key, APP_ORIGIN and WORKER_SECRET — and that NO field anywhere in the app accepted
+// any of them. They could only be typed into the Supabase dashboard from a terminal, so a
+// non-technical owner pressed the one button on the one daily-loop page and hit a dead end naming a
+// key they had no way to enter. Reading presence while refusing to let anyone fix it is the worst of
+// both worlds: the app knew exactly what was wrong and could not help.
+//
+// The machinery was already here — deploy-backend has written edge secrets through the Management API
+// for ages; it was just never pointed at the owner's OWN project. This does that, with the same
+// discipline: the token is the owner's own Supabase personal access token, stored server-side via
+// Settings → Connections and never returned to the browser; the project is derived from this
+// deployment's own SUPABASE_URL (never from the request, so a caller cannot aim it at someone else's
+// project); and only names on the SECRETS allowlist below can be written.
 //
 // Auth: owner JWT (the operator, from the Health page). This is a single-operator system; any
 // authenticated user IS the operator. Secrets are reported as present/absent only.
 // Deploy: supabase functions deploy system-control
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { getConnection } from '../_shared/connections.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 
@@ -63,7 +79,60 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = body?.action === 'arm' ? 'arm'
       : body?.action === 'probe_places' ? 'probe_places'
+      : body?.action === 'set' ? 'set'
       : 'status';
+
+    // ---- set an edge secret, from inside the app ----
+    if (action === 'set') {
+      const name = String(body?.name ?? '').trim();
+      const value = String(body?.value ?? '');
+      const allowed = SECRETS.some((sx) => sx.name === name);
+      if (!allowed) {
+        return json({ error: `"${name}" is not a key this app uses. Nothing was changed.` }, 400);
+      }
+      if (!value.trim()) return json({ error: 'Paste the key\u2019s value \u2014 an empty value would switch the feature off.' }, 400);
+
+      const conn = await getConnection(admin, user.id, 'supabase');
+      if (!conn?.access_token) {
+        return json({
+          error: 'Connect Supabase first \u2014 one paste of a personal access token, and every other key can be set from here.',
+          needs: 'supabase_connection',
+        }, 409);
+      }
+
+      // The project is THIS deployment, derived from its own URL. Never from the caller.
+      const ref = (Deno.env.get('SUPABASE_URL') ?? '').match(/https:\/\/([a-z0-9]+)\.supabase\.(co|in)/i)?.[1];
+      if (!ref) {
+        return json({ error: 'Could not work out which Supabase project this is running on.' }, 500);
+      }
+
+      const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/secrets`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${conn.access_token}`, 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(20_000),
+        body: JSON.stringify([{ name, value }]),
+      });
+      if (!res.ok) {
+        const detail = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 240);
+        const hint = res.status === 401 || res.status === 403
+          ? ' \u2014 the Supabase token was rejected. Reconnect it in Settings \u2192 Connections.'
+          : res.status === 404 ? ' \u2014 that Supabase project was not found for this token.' : '';
+        return json({ error: `Supabase refused to save the key (${res.status}${hint}). ${detail}` }, 502);
+      }
+
+      // The VALUE is never logged, here or anywhere. Only that it was set, and by whom.
+      await admin.from('execution_runs').insert({
+        owner_id: user.id, connector: 'supabase', action: 'set_secret',
+        status: 'ok', request: { name },
+      }).then(() => {}, () => {});
+
+      // Edge functions read secrets at boot, so a just-saved key is live for NEW invocations but this
+      // running instance still holds the old environment. Say so rather than let the light lie.
+      return json({
+        ok: true, name,
+        note: 'Saved. It takes about a minute to reach the running functions \u2014 the light here may lag until then.',
+      });
+    }
 
     // PROBE the Google Places key with a real (tiny) call — presence booleans can't tell a VALID key
     // from an invalid/over-quota one, which fails every hunt while the readiness light reads green.

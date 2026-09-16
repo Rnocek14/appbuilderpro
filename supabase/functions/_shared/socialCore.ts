@@ -94,6 +94,31 @@ export function providerPayload(d: SocialDraft): Record<string, unknown> {
   return body;
 }
 
+/** THE FINAL PLATFORM URL — the thing that turns "we think it went out" into "here it is".
+ *  provider_post_id holds the provider's own envelope id, which nobody can open in a browser, and
+ *  until now the per-platform results were read only for pass/fail.
+ *
+ *  Defensive on purpose: the exact field name is the provider's, not ours, so several plausible keys
+ *  are accepted and anything that is not an http(s) URL is ignored. A platform that returns no URL
+ *  gets NO entry — never a constructed one, because a guessed permalink that 404s is worse than an
+ *  honest blank. Pure; verified by src/lib/garvis/social.verify.ts. */
+export function platformUrls(res: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const ids = (res as { postIds?: unknown })?.postIds;
+  if (!Array.isArray(ids)) return out;
+  for (const raw of ids) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    const platform = typeof o.platform === 'string' ? o.platform.trim().toLowerCase() : '';
+    if (!platform) continue;
+    for (const key of ['postUrl', 'url', 'permalink', 'postURL']) {
+      const v = o[key];
+      if (typeof v === 'string' && /^https?:\/\//i.test(v.trim())) { out[platform] = v.trim(); break; }
+    }
+  }
+  return out;
+}
+
 export type PostStatus = 'posted' | 'scheduled' | 'failed';
 
 /** Map a provider response to our status. Scheduled posts come back with a scheduled marker; a

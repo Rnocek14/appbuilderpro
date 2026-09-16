@@ -25,20 +25,29 @@ export const NAV_SECTIONS: NavSection[] = [
     // THE CORE LOOP — what you touch every day. Keep this to ~5 items.
     title: 'Core',
     items: [
+      // The one door a brand-new owner needs. It was the survey's first finding: three keys decided
+      // whether anything worked and no screen accepted any of them, so the first real button was a
+      // dead end. Start here finishes all five setup steps in one place — it sits first because
+      // nothing below it works until it is done.
+      { to: '/garvis/start', label: 'Start here', icon: KeyRound },
       { to: '/garvis/command', label: 'Home', icon: Sparkles },
       // The content-channel daily loop: every growth world, its channels, and the one-click start.
       { to: '/garvis/channels', label: 'Channels', icon: Film },
-      // The swift-prep screen: the prospect list + one-click Build & send (and the Claude scrape).
-      { to: '/garvis/leads', label: 'Prospects', icon: Target },
+      // The daily selling screen. Renamed from "Prospects": the door has to say what is behind it, and
+      // "Prospects" named a category of record rather than the work. It is now the same words the page
+      // itself uses — find local businesses with bad websites, build them one, email them.
+      { to: '/garvis/leads', label: 'Businesses to pitch', icon: Target },
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
-      { to: '/garvis/client-book', label: 'Clients', icon: BookUser },
+      { to: '/garvis/client-book', label: 'Your clients', icon: BookUser },
     ],
   },
   {
     title: 'Prospecting',
     items: [
-      // The richer hunt/config front door (set up ongoing hunts, verticals, territory).
-      { to: '/garvis/clients', label: 'Find clients', icon: Rocket },
+      // Renamed from "Find clients", which collided with both "Businesses to pitch" (the list) and
+      // "Clients" (the people already paying you) — three doors whose names did not say which was
+      // which. This one is the targeted search: you name a trade and a place.
+      { to: '/garvis/clients', label: 'Search a town or trade', icon: Rocket },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
       // Public records → ranked trade leads: markets on the hourly clock, approval-gated digests.
@@ -64,7 +73,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       // Renamed from "Client billing" so it stops colliding with "Money" and account "Billing":
       // three money doors, three distinct names — agency MRR vs personal invoices vs the app's own bill.
-      { to: '/garvis/client-billing', label: 'Client revenue', icon: Receipt },
+      { to: '/garvis/client-billing', label: 'What clients pay you', icon: Receipt },
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
     ],
   },

@@ -22,6 +22,7 @@ export type Archetype = 'intel' | 'audience' | 'studio' | 'launch' | 'loop' | 'l
 export type Flavor =
   | 'generic' | 'direct_mail' | 'email' | 'social' | 'video' | 'landing'
   | 'market' | 'brand' | 'crm' | 'lists' | 'ads'
+  | 'listing_campaign' // REAL-ESTATE CAMPAIGN: verified community facts → draft → approval → posted
   | 'feature_lab' // PRODUCT work: feature ideation + specs for a platform the owner builds or works for
   | 'assist'      // OPERATOR ASSISTANT: an answering desk — paste an item, get a reply grounded in this world's knowledge base
   | 'deliver'     // DELIVERABLE GENERATOR: a document studio — produce a portable, exportable proposal/report/one-pager
@@ -58,8 +59,12 @@ export function parseCharter(raw: unknown): Charter | null {
   };
 }
 
+// The RUNTIME list, and the only one parseCharter trusts — a flavor missing here is silently
+// downgraded to 'generic', which reads as "the studio disappeared" rather than as an error. The type
+// union above cannot be enumerated at runtime, so workweb.verify.ts asserts this list against the
+// keys of FLAVOR_WORKSHOPS (a Record<Flavor, …>, so the compiler keeps THAT complete).
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth', 'lead_engine', 'merch',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth', 'lead_engine', 'listing_campaign', 'merch',
 ];
 
 export interface ArchetypeMeta {
@@ -100,7 +105,7 @@ export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
   'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec', 'gen-reel',
   'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
-  'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data', 'open-tracker', 'open-lead-engine',
+  'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data', 'open-tracker', 'open-lead-engine', 'open-campaign-studio',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
@@ -127,6 +132,9 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   ],
   tracker: [
     T('open-tracker', 'Open the registry', 'Log an entry — a client note, an expense, a decision. Every entry becomes part of this world\'s queryable memory: ask "what do I know about Jane?" and the answer cites your own records.', 'view'),
+  ],
+  listing_campaign: [
+    T('open-campaign-studio', 'Open the campaign studio', 'A community\'s VERIFIED facts become a draft, the draft becomes an approval, and only an approved version publishes. A fact with no source, or one past its review date, shows as a hole instead of a sentence.', 'view'),
   ],
   lead_engine: [
     T('open-lead-engine', 'Open the lead market', 'Sources, ranked leads with stated reasons, outcome tracking, and the digest queue. Every lead traces to its public record; the digest goes out only through Approvals.', 'view'),
@@ -297,7 +305,31 @@ export const APP_MARKETING_TEMPLATE: WebTemplate = {
   ],
 };
 
-export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, LEAD_ENGINE_TEMPLATE, APP_MARKETING_TEMPLATE];
+/** REAL-ESTATE MARKETING — the focused workspace (docs/real-estate-marketing-implementation.md).
+ *
+ *  Deliberately FIVE areas, not twenty. MOM_REAL_ESTATE_TEMPLATE is a map of every option a realtor
+ *  could ever want, which is precisely the "so many places to go" complaint the doctrine exists to
+ *  answer — and because none of its flavors is studio-first, that world opens on the canvas with the
+ *  work behind an "Advanced" disclosure. This one leads with the campaign studio and keeps the
+ *  set-once areas beside it, so the page opens on the work.
+ *
+ *  The chain it exists to carry, in order: facts → campaign → approval → scheduled → posted →
+ *  inquiries → results. One community proves it; the second community proves it generalised. */
+export const REAL_ESTATE_CAMPAIGN_TEMPLATE: WebTemplate = {
+  id: 'real-estate-campaign',
+  title: 'Real Estate Marketing',
+  description: 'One community at a time: verified facts with sources become drafts, drafts become approvals, and only an approved version publishes — then the inquiry and the outcome are attributed back to it.',
+  playIds: ['lakefront-seller'],
+  nodes: [
+    N('campaigns', 'Campaign Studio', 'The daily surface: what needs a decision, what is scheduled, what worked — and one button to draft the next post from verified facts.', 'studio', 'listing_campaign'),
+    N('communities', 'Communities & Facts', 'Every claim with its source and the date it must be re-checked. A fact without a source never reaches published copy.', 'intel', 'market'),
+    N('destinations', 'Destinations', 'Which accounts a post goes to, and the brokerage line that rides with every one of them.', 'vault', 'brand'),
+    N('inquiries', 'Inquiries', 'Everyone who asked — with the post and campaign that caused it, when that is actually known.', 'audience', 'crm'),
+    N('results', 'Results', 'Posts, inquiries, appointments and signed listings — joined, with unknown attribution left honestly unknown.', 'ledger', 'generic'),
+  ],
+};
+
+export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, REAL_ESTATE_CAMPAIGN_TEMPLATE, APP_LAUNCH_TEMPLATE, LEAD_ENGINE_TEMPLATE, APP_MARKETING_TEMPLATE];
 
 export function templateById(id: string): WebTemplate | null {
   return WEB_TEMPLATES.find((t) => t.id === id) ?? null;

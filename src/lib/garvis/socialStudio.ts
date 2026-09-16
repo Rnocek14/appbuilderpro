@@ -38,7 +38,7 @@ const RE: SocialIdea[] = [
     render: (c, v) => ({
       parts: [
         P('Post', pick([
-          `SOLD in ${area(c)} 🎉\n\nAnother happy [EDIT: seller/buyer]! This one [EDIT: sold over asking / in X days / detail].\n\nThinking about making a move? The ${area(c)} market is [EDIT: honest one-liner]. DM me “value” for a free, no-pressure number on your home.`,
+          `SOLD in ${area(c)} 🎉\n\nClosed for [EDIT: seller/buyer]. This one [EDIT: sold over asking / in X days / detail].\n\nThinking about making a move? The ${area(c)} market is [EDIT: honest one-liner]. DM me “value” for a free, no-pressure number on your home.`,
           `Just closed 🔑 Congrats to [EDIT: first name / “my wonderful clients”]!\n\nThe ${area(c)} market is [EDIT: one honest one-liner]. If you’ve ever wondered what yours is worth today, I’ll tell you honestly — no obligation. Comment 🏡 below.`,
         ], v)),
         P('Hashtags', `#JustSold #${area(c).replace(/[^A-Za-z]/g, '')}RealEstate #HomeSold #RealEstate #ThankYou`, false),
@@ -81,7 +81,7 @@ const RE: SocialIdea[] = [
       parts: [
         P('Post', pick([
           `This is why I do what I do 💛\n\n“[EDIT: paste a real review from a client]”\n\nThank you, [EDIT: first name]! Helping people [EDIT: buy/sell] in ${area(c)} is the best job there is. Who’s next? 🏡`,
-          `Client love 💬\n\n“[EDIT: a real testimonial]”\n\nNothing means more than a happy client. If you’re thinking about a move in ${area(c)}, I’d love to help you feel the same way.`,
+          `Client love 💬\n\n“[EDIT: a real testimonial]”\n\nReviews like this are why I do this work. If you’re thinking about a move in ${area(c)}, I’d be glad to help.`,
         ], v)),
         P('Hashtags', `#ClientLove #Testimonial #${area(c).replace(/[^A-Za-z]/g, '')}RealEstate #ThankYou`, false),
         bestFor('Instagram + Facebook · a clean review-quote graphic. Only ever use real reviews.'),

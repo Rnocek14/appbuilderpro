@@ -6,6 +6,10 @@
 // Honesty rules (load-bearing):
 //  • Every number (price, beds, baths) is a STRING the operator typed — never computed, never invented.
 //  • Missing facts become visible [EDIT: …] holes AND a warning, never a plausible guess.
+//  • NOBODY ELSE'S STATE IS ASSERTED. Copy never claims a client was happy, a sale went smoothly, or
+//    a home is move-in ready — those are facts about other people and other people's property that
+//    nobody here verified. Offering to help IS ours to say; a seller's feelings are not.
+//    campaignCore.verify.ts asserts the absence of that language over every generated default.
 //  • Listing pieces (just listed / sold / open house) carry the REAL property photo. The prospecting
 //    piece ("thinking of selling in Lake Geneva?") shows NO property — it's a brand/lifestyle card,
 //    so a photo is optional and nothing about a specific home is claimed.
@@ -303,9 +307,9 @@ function socialFor(input: CampaignInput, b: Bits): SocialPost[] {
     return renderAll({
       emoji: '🎉',
       hook: `JUST SOLD${b.addr ? ` — ${b.addr}` : ''}`,
-      body: `Another happy seller${b.area ? ` in ${b.area}` : ''}. ${highlight}`,
+      body: `Sold${b.area ? ` in ${b.area}` : ''}. ${highlight}`,
       cta: `Thinking of selling? Let’s find out what your home is worth.`,
-      authority: `Just closed${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'} Happy to share what I’m seeing for owners weighing a sale.`,
+      authority: `Just closed${b.area ? ` in ${b.area}` : ''}. ${b.highlight || EDIT('one verified detail about the sale')} Glad to share what I’m seeing for owners weighing a sale.`,
       tags: reTags(['#JustSold', '#SoldHome', '#ThinkingOfSelling']),
     });
   }
@@ -326,7 +330,7 @@ function socialFor(input: CampaignInput, b: Bits): SocialPost[] {
     hook: `JUST LISTED${where ? ` — ${where}` : ''}${b.price ? ` · ${b.price}` : ''}`,
     body: `${specLine}${highlight}`,
     cta: `DM me for a private showing.`,
-    authority: `New to market${b.area ? ` in ${b.area}` : ''}${b.price ? ` at ${b.price}` : ''}. ${specLine}${b.highlight || 'Move-in ready.'} Reach out if you or someone in your network is looking.`,
+    authority: `New to market${b.area ? ` in ${b.area}` : ''}${b.price ? ` at ${b.price}` : ''}. ${specLine}${b.highlight || EDIT('one verified thing about this home')} Reach out if you or someone in your network is looking.`,
     tags: reTags(['#JustListed', '#HomeForSale', '#HouseHunting']),
   });
 }
@@ -344,7 +348,7 @@ function emailFor(input: CampaignInput, b: Bits & { agent: string; phone: string
   if (input.type === 'just_sold') {
     return {
       subject: `Just sold${b.area ? ` in ${b.area}` : ''} — is your home next?`,
-      body: `Hi there,\n\nI just closed on ${b.addr || 'another home'}${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'}\n\nIf you’ve thought about selling, I’d be glad to tell you what yours could sell for — free, and with no pressure.\n\nReply anytime.\n\n${sign}`,
+      body: `Hi there,\n\nI just closed on ${b.addr || 'another home'}${b.area ? ` in ${b.area}` : ''}. ${b.highlight || EDIT('one verified detail about the sale')}\n\nIf you’ve thought about selling, I’d be glad to tell you what yours could sell for — free, and with no pressure.\n\nReply anytime.\n\n${sign}`,
     };
   }
   if (input.type === 'open_house') {

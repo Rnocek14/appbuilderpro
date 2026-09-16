@@ -4,6 +4,6 @@
 
 export {
   KNOWN_PLATFORMS, PLATFORM_LABEL, PLATFORM_LIMIT, MEDIA_REQUIRED,
-  isPlatform, checkDraft, providerPayload, mapProviderResult,
+  isPlatform, checkDraft, providerPayload, mapProviderResult, platformUrls,
   type Platform, type SocialDraft, type SocialCheck, type PostStatus,
 } from '../../../supabase/functions/_shared/socialCore';

@@ -26,6 +26,8 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { reconcile } from '../_shared/reconcileCore.ts';
+import { getConnection } from '../_shared/connections.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
 import { sendBookingNotice } from '../_shared/bookingNotify.ts';
 import { checkCredits, spendCredits, getUserPlan } from '../_shared/credits.ts';
@@ -384,6 +386,94 @@ Deno.serve(async (req) => {
         }
       }
     } catch { /* batch drain must never wedge the order tick */ }
+
+    // ---- IN-FLIGHT RECONCILIATION (app_0140) ---------------------------------------------------
+    // social-publish's 30s abort can fire AFTER the provider accepted a post, so a timed-out send
+    // leaves a row that may or may not be live on a real account. Retrying blind risks posting the
+    // same thing twice; abandoning it risks a post nobody here knows about. So we go and look.
+    //
+    // The claim is only released — making the post eligible for the drain again — when the provider's
+    // history came back, proved itself by containing recent records, and did NOT contain ours. Any
+    // other answer leaves the row in_flight and asks a human once. A duplicate on a client's real
+    // account is worse than a post that waits.
+    try {
+      const RECONCILE_AFTER_MS = 5 * 60_000;   // give a slow provider time to answer first
+      const RECONCILE_PER_TICK = 3;
+      const staleBefore = new Date(Date.now() - RECONCILE_AFTER_MS).toISOString();
+      const { data: stuck } = await admin.from('social_posts')
+        .select('id, owner_id, approval_id, body, platforms, claimed_at, current_version_id')
+        .eq('status', 'in_flight').lt('claimed_at', staleBefore)
+        .order('claimed_at', { ascending: true }).limit(RECONCILE_PER_TICK);
+
+      for (const p of (stuck ?? []) as {
+        id: string; owner_id: string; approval_id: string | null; body: string;
+        platforms: string[]; claimed_at: string; current_version_id: string | null;
+      }[]) {
+        try {
+          // Publish what was APPROVED, so compare against that too — the live row may since differ.
+          let body = p.body ?? '';
+          if (p.current_version_id) {
+            const { data: ver } = await admin.from('post_versions')
+              .select('body').eq('id', p.current_version_id).maybeSingle();
+            if (ver) body = String((ver as { body?: string }).body ?? body);
+          }
+
+          const conn = await getConnection(admin, p.owner_id, 'ayrshare');
+          let fetched = false;
+          let payload: unknown = null;
+          if (conn?.access_token) {
+            try {
+              const hres = await fetch('https://app.ayrshare.com/api/history?lastRecords=25', {
+                headers: { Authorization: `Bearer ${conn.access_token}` },
+                signal: AbortSignal.timeout(20_000),
+              });
+              if (hres.ok) { payload = await hres.json().catch(() => null); fetched = true; }
+            } catch { /* a dead endpoint is not evidence — the core treats it as unknown */ }
+          }
+
+          const verdict = reconcile(fetched, payload, {
+            body, platforms: (p.platforms ?? []) as string[], sentAtIso: p.claimed_at,
+          });
+
+          if (verdict.verdict === 'posted') {
+            await admin.from('social_posts').update({
+              status: 'posted', posted_at: nowIso, claimed_at: null, error: null,
+              ...(verdict.providerId ? { provider_post_id: verdict.providerId } : {}),
+              ...(Object.keys(verdict.postUrls).length ? { post_urls: verdict.postUrls } : {}),
+            }).eq('id', p.id).eq('status', 'in_flight');
+            await admin.from('mind_events').insert({
+              owner_id: p.owner_id, source: 'execution', event_type: 'note',
+              subject: 'A post that timed out had actually gone out — it is recorded now.',
+              payload: { key: `social-reconciled:${p.id}`, post_row_id: p.id, verdict: 'posted' },
+            }).then(() => {}, () => {});
+          } else if (verdict.verdict === 'not_posted') {
+            // Safe to try again: release the claim AND return the row to the drain's queue.
+            if (p.approval_id) {
+              const { data: ap } = await admin.from('approvals')
+                .select('result').eq('id', p.approval_id).maybeSingle();
+              const prior = ((ap as { result?: Record<string, unknown> } | null)?.result) ?? {};
+              await admin.from('approvals')
+                .update({ result: { ...prior, send_claimed_at: null, reconciled_at: nowIso } })
+                .eq('id', p.approval_id);
+            }
+            await admin.from('social_posts').update({
+              status: 'queued', claimed_at: null,
+              error: 'The provider never received this — it will be sent again.',
+            }).eq('id', p.id).eq('status', 'in_flight');
+          } else {
+            // UNKNOWN. Never retried, never quietly failed: asked, once (the mind_events key
+            // dedupes, so a provider that stays dead does not nag every fifteen minutes).
+            await admin.from('social_posts')
+              .update({ error: verdict.reason }).eq('id', p.id).eq('status', 'in_flight');
+            await admin.from('mind_events').insert({
+              owner_id: p.owner_id, source: 'execution', event_type: 'note',
+              subject: `A post cannot be confirmed: ${verdict.reason.slice(0, 120)}`,
+              payload: { key: `social-unconfirmed:${p.id}`, post_row_id: p.id, verdict: 'unknown' },
+            }).then(() => {}, () => {});
+          }
+        } catch { /* one stuck post never blocks the rest */ }
+      }
+    } catch { /* reconciliation must never wedge the order tick */ }
 
     // ---- SOCIAL POST DRAIN (app_0070) ----------------------------------------------------------
     // The missing half of social auto-posting: an APPROVED post used to publish only if the

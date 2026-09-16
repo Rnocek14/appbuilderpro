@@ -1,0 +1,1030 @@
+##### Finding businesses to sell to
+This part of the product is meant to fill a list of real local businesses, show you which ones have a bad or missing website, build each one a free demo site, and email them a pitch. There are TWO separate front doors that do overlapping versions of this and do not share their results. "Prospects" (in the always-visible sidebar) is a saved, growing list: one orange button, "Scrape the web (Claude)", goes out and finds real businesses across US metros and files them into a pool you keep forever; each row has a one-click "Build & send". "Find clients" (buried under More > Prospecting) is a throwaway search box: you type a trade and a town, it finds businesses, actually opens each one's website and grades it 10-100 with a Weak / Dated / Already solid verdict, and you press "Build their site" one at a time — but the results vanish when you leave the page. The grading engine is the real product here (src/lib/garvis/siteAudit.ts): it only reports things it genuinely saw on the page (no HTTPS, no mobile setup, no contact form, thin content, an old copyright year, missing page title) and refuses to invent a score for a site it could not load. Nothing on the Prospects list is graded at all — that page only knows "has a website" or "doesn't". None of it works out of the box: finding businesses needs either an Anthropic key or a Google Places key set in Supabase secrets, and sending needs four more things (APP_ORIGIN, a Resend key, a from-address, a mailing address, and the outbound switch flipped on). Every business search costs real money per search, and one press of the big orange button on Prospects can fire up to 120 paid AI searches.
+
+- [PARTIAL] Your saved list of local businesses to sell to — who they are, whether they have a website, and where each one is in the pipeline (New / Built / Pitched / Won / Skipped)
+    route: /garvis/leads | Sidebar > Prospects
+    needs: The app_0072 migration applied, and at least one successful run of the 'Scrape the web (Claude)' button (which itself needs ANTHROPIC_API_KEY).
+    trap: On day one it says 'No prospects yet' and the ONLY way to put anything in it is the scrape button — so if that button fails for a missing key, this page looks permanently broken with no alternative path, and you cannot type in a business you already know about.
+- [NEEDS_SETUP] Find local businesses across the whole country automatically — press once and Claude searches the web for real businesses and files them into your list
+    route: no route (orange button at the top of /garvis/leads) | Sidebar > Prospects > 'Scrape the web (Claude)'
+    needs: ANTHROPIC_API_KEY in Supabase secrets; the discover-run function deployed; a positive credit balance; the AI kill switch OFF and the daily/monthly spend caps not reached (Settings > Spending guard, app_0127_spend_guard.sql).
+    trap: One press is not one search. The page loops up to 60 rounds of 2 areas each — up to 120 paid AI searches — and each round can take 30+ seconds, so you sit watching 'Searching the web…' for many minutes with money draining. If your credits run out halfway the message reads 'Out of credits — Claude scouting skipped this run', which looks like a crash rather than a bill.
+- [NEEDS_SETUP] One-click: build this business a demo website and email them the pitch right now
+    route: no route (orange 'Build & send' button on each row of /garvis/leads) | Sidebar > Prospects > 'Build & send' on any row
+    needs: APP_ORIGIN set to your live URL, RESEND_API_KEY, a from_email and a physical mailing address saved in Setup, and outbound_enabled switched ON (it is OFF by default).
+    trap: This button does NOT go through the Queue for approval — it builds the demo and fires a real cold email to a real business in the same 30-60 second press, despite the rest of the app promising 'nothing sends without your approval'. And when it half-works you get 'Demo built — no email found to send to', which looks like an error but is actually the normal outcome for a business with no published email address.
+- [NEEDS_SETUP] Open one business and look at everything about them — their site, their phone, the demo you built, the actual pitch email — and press Send only after you've read it
+    route: no route (slide-out drawer; click any row on /garvis/leads) | Sidebar > Prospects > click a business name
+    needs: Same as Build & send: APP_ORIGIN, Resend key, from-address, mailing address, outbound switch on.
+    trap: This is the safe, review-before-you-send path, and it is completely invisible — it only opens if you happen to click the business's NAME rather than the big orange button sitting right next to it, which sends immediately with no review.
+- [PARTIAL] The 'Find clients' front door — a pipeline picture showing Find / Sites built / Pitches / Clients
+    route: /garvis/clients | Sidebar > More > Prospecting > Find clients
+    needs: nothing
+    trap: You land on a picture of an empty pipeline that reports zero even if you pitched 50 businesses yesterday, and there is no obvious way forward — you have to realise the bubbles are clickable. It is preamble in front of the actual tool, which is one click deeper.
+- [NEEDS_SETUP] Type a trade and a town, get real businesses back, and see whose website is weak
+    route: no route (search bar inside /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > 'Find businesses'
+    needs: EITHER GOOGLE_PLACES_API_KEY (with Google Cloud billing) OR ANTHROPIC_API_KEY plus credits, in Supabase secrets.
+    trap: The results are never saved. Close the tab, hit Back, or click a bubble and every business you found and every site grade you paid for is gone — and none of it appears on the Prospects page, which reads a completely different table.
+- [WORKING] Paste a business's website you already know about and have it read and graded
+    route: no route ('Scan a URL' box inside /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > 'Scan a URL'
+    needs: nothing beyond the fetch-url function being deployed and being signed in
+    trap: It is the one thing in this whole cluster that works with zero setup, and it is hidden in a secondary text box two clicks deep, underneath a search bar that does not work without a paid API key.
+- [WORKING] The website grade itself — a 10-100 score and a Weak / Dated / Already solid verdict with the plain-English reasons (no HTTPS, not mobile-friendly, no way to contact them, hardly any content, copyright says 2019, no page title)
+    route: no route (badges on the results inside /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > run a search or scan a URL
+    needs: nothing — it runs on whatever the page fetch returned
+    trap: This grading NEVER touches your Prospects list. The scores live in a different table (prospect_audits) than the pipeline (discovered_businesses) and nothing joins them, so the page you visit every day shows no score at all — only a 'no website' tag. You will think the grading feature is missing.
+- [NEEDS_SETUP] Sweep the whole country for one trade — run the same search across the top 25/50/100 cities or a whole state
+    route: no route ('Sweep the nation' inside /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > 'Sweep the nation'
+    needs: GOOGLE_PLACES_API_KEY (or the Anthropic fallback plus a large credit balance)
+    trap: The cost line under the button (src/lib/garvis/nationalSweepCore.ts sweepCostLine) says '50 cities → 50 Google searches'. That is only true with a Places key. With no Places key it quietly falls through to the Claude scout, so 'Top 50 markets' is 50 paid AI web searches, and 'All cities' is hundreds — and the sentence on screen still says 'Google searches'. The whole haul is also discovery-only and unsaved.
+- [PARTIAL] Survey every business in a group of towns, grade them all, and keep it as a study you can quote ('41% of the 87 sites we looked at…')
+    route: no route ('Sweep these towns (collect study)' inside /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > type a comma-separated town list in the Area box > 'Sweep these towns'
+    needs: A discovery key (Places or Anthropic), the app_0117 migration for the study to be filed (without it the leads still save and you get '(study table not installed)').
+    trap: The button does not exist until you happen to type 'Lake Geneva, Delavan, Elkhorn' with commas into a box labelled 'Town or area — e.g. Lake Geneva, WI'. Nothing on the page tells you this. The most powerful tool in the cluster is invisible by default.
+- [NEEDS_SETUP] Run that same town survey on the server so you can close your laptop
+    route: no route ('Run on the server' next to the town sweep in /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > type 2+ comma-separated towns > 'Run on the server'
+    needs: The heartbeat armed (a SQL command from docs/RUNBOOK.md, plus WORKER_SECRET matching) AND a discovery key.
+    trap: It cheerfully toasts 'Study queued — safe to close this tab. Results land in Studies' whether or not the background clock exists. If the heartbeat was never armed, nothing ever runs and Studies stays empty forever with no error anywhere.
+- [NEEDS_SETUP] Autopilot: put the hunt on a daily schedule so it finds businesses, builds demos and queues pitches while you sleep — plus a 'Run now' button to prove it works today
+    route: no route ('Put it on autopilot' panel inside /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > 'Turn on daily hunt'
+    needs: GOOGLE_PLACES_API_KEY, APP_ORIGIN, the heartbeat armed, plus the full send stack (Resend key, from-address, mailing address, outbound switch) before any pitch actually leaves.
+    trap: Turning it on says 'Garvis will sweep fresh markets every day' regardless of whether the clock is armed or Places is keyed. With APP_ORIGIN unset in particular it will run, build demos, and then silently queue nothing — you get a hunt that appears 'running daily' and produces absolutely nothing, with no error to point at.
+- [WORKING] The 'Ready to hunt & send' light — a traffic light telling you exactly which keys and settings are missing before you waste a press
+    route: no route (panel at the top of /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble (panel sits above the search bar)
+    needs: nothing
+    trap: It hard-fails on 'Google Places key' and then announces 'Not ready to hunt yet', even though the Claude scout path finds businesses perfectly well with only the Anthropic key. It will tell you the thing you just successfully did is impossible. It also sits only on this page — it is NOT on the Prospects page you actually use every day.
+- [WORKING] Every website you've ever graded, kept in one place, filterable by how bad the site is, with a CSV download
+    route: no route (collapsed 'Saved audits' strip low down /garvis/clients) | Sidebar > More > Prospecting > Find clients > click any bubble > scroll past the search box
+    needs: The app_0074 migration applied, and at least one search or URL scan having run
+    trap: It renders NOTHING AT ALL when empty (`if (loaded && rows.length === 0) return null`) and is collapsed even when full — so the one permanent record of your grading work is a strip you will never notice exists.
+- [WORKING] Studies — turn a town survey into publishable numbers you can put in a pitch or hand a local newspaper
+    route: /garvis/studies (and /garvis/studies/:id) | Sidebar > More > Prospecting > Studies
+    needs: app_0117 applied and at least one completed town sweep (the hidden 'Sweep these towns' button, or the server study order)
+    trap: Its empty state tells you to 'Run a town-list sweep on Win Clients' and links there — but no sidebar item is called 'Win Clients' any more (it is 'Find clients'), and the button it means is the one that stays hidden until you type commas into the Area box. So the instruction is unfollowable.
+- [NEEDS_SETUP] Opportunity feed — jobs, RFPs, grants and commissions that a background hunt found on the open web (a different kind of lead from local businesses)
+    route: /garvis/opportunity-feed | Sidebar > More > Prospecting > Opportunities
+    needs: SERPER_API_KEY in Supabase secrets, the heartbeat armed, AND a hunt created first — which you can only do from Orchestrate by typing a sentence like 'find all mural and custom art jobs'. Nothing on this page creates one.
+    trap: It sits in the Prospecting section right under the button that finds local businesses, but it has nothing to do with them — and it has no button of its own. It is an inbox with no way to start the thing that fills it, so it stays permanently empty and looks broken.
+- [DEAD] Opportunities (old version) — an AI scan of YOUR OWN portfolio of apps looking for synergies and expansion plays. Nothing to do with finding businesses to sell to.
+    route: /garvis/opportunities | URL-ONLY (also findable by typing 'opportunities' in the Cmd-K palette, labelled 'Opportunities (legacy)')
+    needs: A portfolio of apps plus AI credits — irrelevant to selling websites to local businesses
+    trap: It is named 'Opportunities', the same word as the sidebar item that points somewhere else entirely. Landing here from an old link or the palette and pressing 'Scan now' gives 'No new opportunities right now' — which you would reasonably read as 'the prospecting engine found nobody'.
+  DEAD ENDS:
+   * TWO SEPARATE PROSPECT LISTS THAT NEVER TALK. 'Prospects' (/garvis/leads) reads the discovered_businesses table; 'Find clients' (/garvis/clients) searches into a throwaway React variable and files its website grades into prospect_audits. Nothing joins them (src/lib/garvis/prospects/prospectsRun.ts never reads prospect_audits). So the page with the grades has no saved list, and the page with the saved list has no grades.
+   * A THIRD prospect list exists: the `prospects` table from supabase/migrations/app_0032_prospects.sql, written and read only by src/lib/garvis/marketIntelRun.ts, which is only reachable inside a single business's world page (/garvis/webs/:worldId, src/pages/WorkWeb.tsx). Despite the filename it is NOT the table behind the sidebar's 'Prospects'.
+   * /garvis/opportunities is routed but missing from navConfig — reachable only by typing the URL or the Cmd-K alias 'Opportunities (legacy)'. Its name collides with the sidebar's 'Opportunities', which goes to /garvis/opportunity-feed and a different table.
+   * The 'Find clients' opening screen (the pipeline canvas in src/pages/WinClients.tsx) is a second door to the same search page — three of its four bubbles call setStage('find') and land in exactly the same place. It always reports 0 found / none built / none pitched because the counts come from unsaved session state.
+   * 'Sweep these towns (collect study)' and 'Run on the server' only render when the Area box already holds 2+ comma-separated towns (WinClients.tsx: parseTownList(area).length >= 2). Unreachable unless you guess the format.
+   * Studies' empty state links to '/garvis/clients' calling it 'Win Clients' — a name that no longer appears anywhere in the sidebar (it is 'Find clients').
+   * 'Preview Engine' (/business-preview-engine, in the same Prospecting nav section) is a third door to building a business a demo site, duplicating 'Build their site' on Find clients and 'Build & send' on Prospects.
+   * 'Lead Markets' (/garvis/lead-engine) sits in the same Prospecting section but is an entirely different pipeline (public permit records → trade leads), not local businesses with weak websites. Four items in one nav section that all sound like 'find leads'.
+   * The `research` edge function is not part of this cluster at all — src/lib/aiClient.ts:291 calls it only from the project workspace to research YOUR app's market. It never looks at a prospect.
+   * The site verdict the Claude scout actually produces ('outdated', 'no website', …) is stored in discovered_businesses.category but the Prospects row only prints `keyword`; it surfaces as raw text in the drawer and nowhere else. Paid-for information, effectively hidden.
+   * Google's own star rating is fetched on every Places search and deliberately never saved (Places terms) — so it appears on the unsaved 'Find clients' results and can never appear on your permanent Prospects list.
+
+##### Building a website for a prospect
+This is the money-making loop of the whole product: find a local business that has a bad website (or none), automatically build them a better one, email it to them as a link they can open with no login, and let them raise their hand or pay. There are THREE separate doors that all build the same thing — the "Build & send" button on Prospects (the good one: it reads the prospect's real site, writes a custom page, emails the pitch), the "Build" button on Find clients (paste or search a URL), and the Preview Engine page (paste a blob of JSON — the technical door). What gets built is stored in your account as a "preview site" with its own secret web link like /preview-site/joes-roofing-k3x9p2; that link is live and public the moment it is created, hosted inside your own app, no extra setup. The business owner opening that link sees their new site, an honest "here's what's wrong with your current site" report, a bar to claim it, and a Stripe buy button. Turning the demo into a REAL website on a real address ("Go Live") and pointing the client's own domain at it are both built and wired to Netlify, but neither will work until a Netlify token is set on the server, and there is no screen in the app to set it. The single most important hidden setting is APP_ORIGIN: until it is set on the server, the one-click "Build & send" button refuses outright, because the demo link it would email would be broken. Everything else in this cluster degrades honestly rather than faking — with no AI key you still get a site, just a plain templated one instead of a custom-designed one.
+
+- [NEEDS_SETUP] Fill your prospect list — "Scrape the web" finds real local businesses and judges how bad their websites are
+    route: /garvis/leads | Sidebar > Prospects > "Scrape the web" button
+    needs: ANTHROPIC_API_KEY set as a Supabase edge secret, and AI credits/spend caps not exhausted (supabase/functions/_shared/credits.ts checkCredits)
+    trap: With no key, pressing the button just shows one grey line of error text and the list stays empty — it looks like 'the app found nothing' rather than 'nobody plugged in the key'.
+- [NEEDS_SETUP] Build a website for one prospect and email it to them — the one-click main path
+    route: /garvis/leads | Sidebar > Prospects > (any row) > "Build & send"
+    needs: APP_ORIGIN (hard-required — the function returns an error before doing anything if unset), ANTHROPIC_API_KEY, the fetch-url and send-email functions deployed, RESEND_API_KEY plus a from-address, physical address and outbound sending switched on in outreach settings; SCREENSHOT_API_KEY optional (it adds the before/after picture to the email)
+    trap: Two different 'success' answers read as failure: if the server has no APP_ORIGIN you instantly get 'Sending isn't configured', and if the prospect's site shows no public email address you get 'Demo built, but no public email was found — nothing was sent' (standing-worker/index.ts:155). In both cases the operator concludes the button is broken, when in the second case a complete website was actually built and is sitting there waiting.
+- [NEEDS_SETUP] Build the demo first, read the exact email, then press Send yourself
+    route: /garvis/leads | Sidebar > Prospects > click a row (opens the drawer) > "Build demo to review" > "Send this pitch"
+    needs: Same as Build & send (APP_ORIGIN, AI key); the Send half needs Resend + outreach settings
+    trap: This safer, more understandable path is hidden — you only find it by clicking a row, and the fast fire-and-forget button sits right there on the row instead.
+- [PARTIAL] Preview Engine — paste a business's details as JSON and generate a demo site
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine
+    needs: Sign-in only for the template result; ANTHROPIC_API_KEY on the server (relayed through the agent-turn function) plus credits for the AI-designed version
+    trap: The page's primary button asks a non-technical person to hand-write JSON. The 'Load a demo' chips are the only realistic way in, and they build a site for a FAKE demo business — so the operator's first real attempt is a wall of red 'That is not valid JSON.'
+- [WORKING] See every demo you've ever built, with view counts, and open / screenshot-view / copy-link / delete each one
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > "Generated previews" list
+    needs: nothing
+    trap: Each row carries eleven tiny icon buttons with no labels (open, screenshot, report, copy, Export, Go Live, Domain, Pitch, Queue, refine, regenerate, delete) — the operator cannot tell which one is the one they want, which is exactly the 'too many buttons' complaint.
+- [PARTIAL] Change a demo by typing what you want different ("make the hero about emergency service, warmer tone")
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > (a demo row) > wand icon > type > "Apply change"
+    needs: ANTHROPIC_API_KEY + credits; otherwise the AI pass fails and the deterministic template is written instead
+    trap: When the AI call fails it does NOT say so — it quietly writes the plain template spec and reports 'Refined to your instructions'. The operator reopens the preview, sees a site that ignored what they asked for (and got plainer), and concludes the feature is fake.
+- [WORKING] Download the finished website as one self-contained .html file — the thing you hand a paying client
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > (a demo row) > "Export"
+    needs: nothing
+    trap: For a custom (Claude-written) site the export returns that HTML verbatim (exportStatic.ts:63), which skips the wiring of the quote form to your lead inbox and the online-booking button — so the file you hand over quietly captures no leads back into the app. And a non-technical operator has nowhere obvious to PUT a downloaded .html file.
+- [NEEDS_SETUP] Go Live — put the demo on a real public web address in one click
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > (a demo row) > "Go Live"
+    needs: A Netlify account, a personal access token set as the NETLIFY_AUTH_TOKEN edge secret, and the publish-preview function deployed
+    trap: There is NO screen anywhere in the app to enter the Netlify token (the only mention in the whole client is a message on the Projects workspace, src/pages/ProjectWorkspace.tsx:995). The operator clicks the rocket, gets a red toast naming an environment variable, and has no path forward inside the product.
+- [NEEDS_SETUP] Point the client's own domain (e.g. summitroofing.com) at the site they just bought, without touching their email
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > (a demo row that is already Live) > "Domain"
+    needs: The site must be published first (connect-domain/index.ts:46 returns 'Publish the site first (Go Live), then connect a domain'), plus NETLIFY_AUTH_TOKEN
+    trap: The Domain button is invisible until the site is Live (PreviewEngine.tsx renders it only when live_url exists) — so the operator selling a site to a client who already owns a domain cannot find this capability at all and assumes it doesn't exist.
+- [NEEDS_SETUP] Turn a generated pitch into a real email waiting for your approval
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > (a demo row) > "Queue" > then Sidebar > Queue to approve
+    needs: Nothing to queue it; RESEND_API_KEY plus from-address, physical address and outbound sending enabled for the Queue's Send to actually deliver
+    trap: It asks for the recipient email in a browser pop-up prompt box, pre-filled from the profile — pop-up prompts look like a bug or a scam to a non-technical user, and dismissing it silently cancels the whole thing.
+- [WORKING] The website the business owner actually opens from your email (no login)
+    route: /preview-site/:slug | URL-ONLY for the prospect; from inside the app: Sidebar > Prospects > (row) globe icon, or Preview Engine > (row) open icon
+    needs: nothing
+    trap: Nothing — but the operator has no way to browse these except one demo at a time, so they never get the reassurance of seeing 'here are the 40 sites I have built'.
+- [WORKING] The honest "what your current website is costing you" report page the owner reads first
+    route: /preview-site/:slug/report | URL-ONLY for the prospect; from inside the app: Sidebar > More > Prospecting > Preview Engine > (a demo row) > document icon
+    needs: nothing
+    trap: The operator never sees this in a place that explains it — it is a nameless document icon in a row of icons, so the strongest sales asset in the product is effectively invisible.
+- [WORKING] The business owner raises their hand — "Claim this website"
+    route: /preview-site/:slug | URL-ONLY (the prospect clicks the bar at the bottom of their preview)
+    needs: nothing required; a webhook URL on your profile if you want a phone ping; Resend for the automatic acknowledgement reply
+    trap: Nothing breaks — but the operator gets no notification anywhere they normally look unless they happen to open the sidebar and spot the small green dot on 'Preview Engine' (src/components/layout/AppShell.tsx:182), which sits behind the 'More' disclosure.
+- [WORKING] Your inbox of people who said yes, with a new → contacted → won/lost status
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > "Claims" section (only appears when there is at least one)
+    needs: nothing
+    trap: This inbox is buried two clicks deep on a page named after a machine ('Preview Engine'), while the app's nav-level 'one decision at a time' surface is the Queue — which never shows claims. A hot lead can sit unseen for days.
+- [NEEDS_SETUP] The prospect pays you — "Make it mine" buy buttons on the preview
+    route: /preview-site/:slug | URL-ONLY (the prospect clicks it); you configure the payment links at Sidebar > More > Money > Client revenue
+    needs: Stripe payment links saved on the Client revenue page; STRIPE_WEBHOOK_SECRET for the paid-sale follow-through
+    trap: The price shown to the prospect comes from a hard-coded tier list (src/lib/garvis/billing/clientTiers), so the buttons quote 'from $1,500' and 'from $500/mo' to real businesses before the operator has set a single price or payment link — and the operator never sees what the prospect sees.
+- [WORKING] The prospect asks "can you automate how I run my business?" straight from the preview
+    route: /preview-site/:slug | URL-ONLY (the prospect types into the panel under their new site); the answers land at Sidebar > More > Prospecting > Opportunities
+    needs: nothing
+    trap: These leads land in a DIFFERENT inbox (Opportunities) than the claims from the same page (Preview Engine) — the operator checks one and never learns the other exists.
+- [NEEDS_SETUP] When a client pays, their site publishes itself
+    route: no route | URL-ONLY — no screen; it happens in the background on a Stripe payment
+    needs: Stripe webhook configured, WORKER_SECRET, NETLIFY_AUTH_TOKEN, and the operator must have pressed Go Live on that demo at least once so a copy is stored
+    trap: It silently does nothing for any demo the operator never published manually, so the promise 'they pay and it goes live' is true only for sites you already published — and nothing on screen tells you that.
+- [PARTIAL] Find clients — search a niche and town (or paste one URL), see how weak each site is, then build a demo from their real site
+    route: /garvis/clients | Sidebar > More > Prospecting > Find clients
+    needs: ANTHROPIC_API_KEY (+ credits) for the build; the fetch-url function deployed; GOOGLE_PLACES_API_KEY or the Claude search engine for finding businesses; APP_ORIGIN + Resend before anything can be emailed
+    trap: This page and Prospects do the same job with different buttons and different quality — the site built here is the older templated kind, while Prospects' Build & send produces the custom-designed kind. The operator can't tell why the same business got a worse-looking site.
+- [NEEDS_SETUP] Build demos automatically overnight (the standing daily hunt)
+    route: /garvis/clients | Sidebar > More > Prospecting > Find clients > the daily hunt / standing order panel
+    needs: The heartbeat/clock armed with WORKER_SECRET (Health page), GOOGLE_PLACES_API_KEY or the Claude engine, ANTHROPIC_API_KEY, APP_ORIGIN, and Resend + outreach settings to send
+    trap: With APP_ORIGIN unset the nightly run still 'works' — it builds demos but queues zero pitches, because it refuses to email a broken link (standing-worker/index.ts:2419). The operator wakes up to an apparently idle system with no error anywhere.
+- [PARTIAL] Let an outside scraper create demos automatically (API tokens)
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > "Scraper API" > show > "New token"
+    needs: Nothing to create a token; an external program you write to call the endpoint
+    trap: Sites created this way are always the plain template (ingest-profile builds a recipe spec, never the AI chain) — and the panel is a wall of curl commands that is meaningless to a non-technical operator yet sits on the same page as their demo list.
+  DEAD ENDS:
+   * The `generate-app` edge function is retired and unreachable: nothing in the client calls it (src/lib/aiClient.ts:144-152 says the edge path was 'Retired' in favour of the in-browser chunked pipeline), yet it is still listed as a function that matters on the Health page (src/lib/garvis/healthRun.ts:26) — so the operator can be sent chasing a deployment that no button uses. It also has nothing to do with prospect websites; it builds apps for the Projects/New app area.
+   * `deploy-site` is a SECOND, completely separate publishing path — it publishes an app you built in Projects, needs the same NETLIFY_AUTH_TOKEN, and requires an approved deploy approval in the Queue (supabase/functions/deploy-site/index.ts). Prospect sites never use it. Two 'publish' concepts, two mechanics, one word.
+   * Three doors build a prospect a website — Prospects > Build & send (custom, Claude-written), Find clients > Build (templated), Preview Engine > paste JSON (templated) — and they produce visibly different quality with no explanation. Only the Prospects path produces the bespoke site (guarded by BESPOKE_DEMOS in supabase/functions/standing-worker/index.ts:2288).
+   * Two 'deliverables' compete on the same row with no guidance: Export (downloads a .html file to your computer) and Go Live (hosts it for real). A non-technical operator cannot tell which one gives the client a website.
+   * Two buttons for the same pitch on the same row: 'Pitch' (copies the email text to the clipboard — a dead end, it goes nowhere) and 'Queue' (the real, approval-gated send).
+   * Two inboxes for the same public preview page: claims land on the Preview Engine page, automation requests land on the Opportunities page, and NEITHER appears in the Queue, which is the app's nav-level 'one decision at a time' surface.
+   * A published or exported custom (Claude-written) site has no quote form wired back to you and no booking button — src/lib/preview/exportStatic.ts:63 returns that HTML verbatim, skipping the leadSubmitUrl and bookingUrl wiring that templated sites get. The claim bar and intake panel exist only on the in-app preview page, not on the site you sell them.
+   * The dev-only preview routes /dev/prospect-web, /dev/rebuild-preview, /dev/web and /dev/flagship-artist (src/App.tsx, gated by import.meta.env.DEV) do not exist in the shipped app — any link or note pointing there is dead for this operator.
+   * /preview-site/:slug/email-shot is a machine-only URL (a stripped, animation-free render for screenshotting) exposed to the operator as an unlabelled camera icon; it needs SCREENSHOT_API_KEY on the server for the picture in the pitch email to exist at all, and nothing in the app says so.
+
+##### Emailing prospects and clients
+This part of the product is the machine that writes, approves, and actually mails email — cold pitches to businesses you want as clients, and warm mail to people already in your book (replies, invoices, reports, reminders, newsletters). Everything funnels through ONE door: no button anywhere sends an email directly. Every button writes a draft into a table and drops a card into the Queue, and only pressing Approve on that card in the Queue causes an email to leave (src/lib/garvis/execution.ts:114 → supabase/functions/send-email/index.ts). The one exception is bulk sends and a few clock-driven rules, where you approve a whole batch once and a background clock mails them out a few at a time under your daily cap (supabase/functions/standing-worker/index.ts:247-380). Before any of it works, five things must be true, and four of them are set by a developer on the server, not by you in the app: an email provider key (RESEND_API_KEY), a public web address for demo links (APP_ORIGIN), a shared clock secret (WORKER_SECRET), the clock itself switched on ("Arm" on the Health page), and then — in the app — your from-address, your legal mailing address, and the outbound master switch flipped on in Settings. With any one missing, the buttons still look alive, the cards still land in the Queue, and the send silently refuses. The honest verdict for this operator: the plumbing is genuinely good and the safety rails are real, but almost nothing in this cluster is usable out of the box, and — worst of all — when a send is refused, the Queue tells you "Edge Function returned a non-2xx status code" instead of the actual reason the server produced, which is exactly why it feels like "anytime I try to do anything it doesn't work." There are also three separate doors for cold-pitching one business, two separate doors for mailing a contact segment, and a monthly client-report email with no button at all.
+
+- [NEEDS_SETUP] Turn email sending on — your from-address, legal mailing address, daily cap, and the master on/off switch
+    route: /settings | Sidebar > More > Account > Settings, then scroll to the "Outreach — sending email" card
+    needs: A from-address on a domain you can verify, a real street address (US law requires it in the footer), and the toggle ON. Separately, a developer must set RESEND_API_KEY as a server secret — there is no field for it anywhere in the app.
+    trap: Flipping the switch says "Outreach is ON — approved emails will send", but that message is a lie if RESEND_API_KEY was never set on the server. You will believe email is live, and every send will refuse with a reason you never see.
+- [PARTIAL] Make each of your businesses send under its own name and address
+    route: /settings | Sidebar > More > Account > Settings > "Outreach — sending email" card > bottom ("Sender identities" panel)
+    needs: A business (world) already created under Businesses, plus a verified sending domain for that business's from-address.
+    trap: It applies all-or-nothing: if you fill in a from-address for a business but its domain is half-verified on the Sending domains page, every email for that business blocks — while your other businesses keep sending fine, so it reads as random.
+- [NEEDS_SETUP] Instant reply to a new website lead, even at 3am (your template, sent automatically)
+    route: /settings | Sidebar > More > Account > Settings > "Outreach — sending email" card > "⚡ Instant first touch" toggle
+    needs: Sending turned on first (the toggle is disabled otherwise), plus a live website of yours that posts leads into the system (the site-events path) — otherwise nothing ever triggers it.
+    trap: It only fires for leads that arrive through a site this product built and hosts. A lead that comes to your own Wix/Squarespace form, or by phone, will never trigger it — so it looks broken when it is simply never called.
+- [NEEDS_SETUP] Forward-in mailbox — forward an email to yourself and answer it inside the Queue
+    route: /settings | Sidebar > More > Account > Settings > "Forward-in mailbox" card
+    needs: A developer must add an inbound domain with MX records at Resend, point its webhook at the resend-inbound function, and set INBOUND_SECRET.
+    trap: The page literally shows you "in-abc123@<your-inbound-domain>" — with the angle brackets. There is no domain to put there until someone sets one up, so copying that address and forwarding mail to it does nothing at all.
+- [NEEDS_SETUP] Verify a sending domain so your email lands in the inbox instead of spam
+    route: /garvis/email-domains | Sidebar > More > Automation & status > Sending domains
+    needs: RESEND_API_KEY on the server (the function refuses with "Email is not connected" without it), plus access to the domain's registrar to paste DNS records. DNS can take an hour.
+    trap: Adding a domain here and NOT finishing the DNS actively breaks sending: send-email blocks any from-address on a tracked-but-unverified domain (supabase/functions/send-email/index.ts, deliverability gate → src/lib/garvis/email/senderDomain.ts:113). You were better off never adding it. The block reason never reaches you in the Queue.
+- [PARTIAL] The Queue — the only place an email actually leaves; approve or reject one card at a time
+    route: /garvis/queue | Sidebar > Queue
+    needs: Everything above: provider key, from-address, mailing address, master switch on, verified domain, daily cap above zero, recipient not suppressed.
+    trap: THE BIG ONE. When a send is refused, send-email returns a plain-English reason ("Outbound is DISABLED", "Missing CAN-SPAM physical address", "Daily send cap (25) reached", "Sending domain X isn't verified"). src/lib/garvis/execution.ts:115 throws that reason away and shows the raw plumbing message instead — every other path in the app uses invokeFailure to surface the real text (see the publish_post branch at execution.ts:189). So the card silently returns to pending and you are told nothing. This single line is why sending "doesn't work" with no explanation.
+- [PARTIAL] Answer a reply, a website lead, or a forwarded email from the Queue's Messages lane
+    route: /garvis/queue | Sidebar > Queue > scroll to "Messages" > press R on a row (or click Reply)
+    needs: An inbound source actually wired: replies need INBOUND_SECRET + Resend inbound; forwarded mail needs the same; website leads need a site this product hosts.
+    trap: Writing the reply does NOT send it. The toast says "Reply staged — approve the send in the Decisions lane above" and the message sits as a second card you must also approve. Most people write the reply, close the page, and assume it went.
+- [NEEDS_SETUP] Prospects: one click builds a business a demo site and emails them the pitch
+    route: /garvis/leads | Sidebar > Prospects > "Build & send" on any row
+    needs: APP_ORIGIN, RESEND_API_KEY, GOOGLE_PLACES_API_KEY or ANTHROPIC_API_KEY (to have prospects at all), SCREENSHOT_API_KEY for the picture, plus outreach settings + master switch. The prospect must also have a public email on their website.
+    trap: Every possible failure shows the same six words. The server produces exact reasons ("Sending isn't configured — set APP_ORIGIN on the server", "Demo built, but no public email was found", "Daily send cap reached"), but Leads.tsx:76 reads them from a field that is always empty on an error response, so you always see "Build failed — try again." Trying again never helps.
+- [NEEDS_SETUP] Prospects: read the exact pitch email (with the before/after screenshots) before sending it
+    route: /garvis/leads | Sidebar > Prospects > click any prospect row > "Build & review" in the drawer > read > Send
+    needs: Identical to Build & send above.
+    trap: Same swallowed errors — reviewSend.ts:29 returns the raw plumbing message. Also, if you press Build & review and then never come back, a pending pitch sits in your Queue forever with no hint it came from here.
+- [NEEDS_SETUP] Find clients: search a trade + area, build demos, queue the pitches
+    route: /garvis/clients | Sidebar > More > Prospecting > Find clients
+    needs: A search key (Places or Anthropic), APP_ORIGIN, and the whole email setup. The readiness panel on this page is the single most honest diagnostic in the product.
+    trap: The readiness panel tells you to add your from-address "in Setup → outreach settings" (src/lib/garvis/huntReadiness.ts:50-54), but the Setup console at /garvis/setup has no such field — the fields live in Settings. You will bounce between two pages looking for a box that isn't on the one you were sent to.
+- [PARTIAL] Preview Engine: turn an already-generated demo site into a queued pitch email
+    route: /business-preview-engine | Sidebar > More > Prospecting > Preview Engine > "Queue send" on a generated preview
+    needs: A preview site already built here, plus the full email setup to actually send from the Queue.
+    trap: It asks for the recipient with a raw browser pop-up box (window.prompt at PreviewEngine.tsx:157). Browsers suppress these after a while, and if you hit Cancel nothing happens and nothing tells you why.
+- [NEEDS_SETUP] Mail a whole group of contacts at once (Everyone / New / Contacted / Qualified / Customers)
+    route: /garvis/contacts | Sidebar > More > Knowledge > Contacts > "Send to a segment" card
+    needs: Contacts in the system, the full email setup, AND the background clock armed (Health page). Without the clock, the approved batch sits at "waiting for approval" forever.
+    trap: You approve it and nothing visibly happens — correctly, because it drains a few per tick under your daily cap over hours or days. If the clock was never armed, it drains zero, forever, with no error anywhere. Progress only shows on the Contacts card or Working for you.
+- [PARTIAL] Email board — write a branded draft for one business (just listed, valuation, referral ask…) and send it to a segment
+    route: /garvis/webs/:worldId | Sidebar > More > Build > Businesses > open a business > its Email area
+    needs: A business created, an email-flavored area inside it, contacts tagged to that business, plus the full email setup and the armed clock.
+    trap: It is invisible unless a business happens to have an 'email' area. If yours doesn't, the entire drafting studio simply is not there, and nothing on the page says it exists or how to create it.
+- [NEEDS_SETUP] See what the background clock is actually mailing for you
+    route: /garvis/working | Sidebar > More > Automation & status > Working for you
+    needs: The clock armed (pg_cron + pg_net + garvis_arm_heartbeat with a WORKER_SECRET), which is done from the Health page's Arm button.
+    trap: With the clock unarmed this page shows batches permanently stuck at "waiting for approval — N to send" even though you approved them. Nothing on this page says the clock is off.
+- [NEEDS_SETUP] Automatic follow-ups to prospects who went quiet (and to people who opened 3+ times)
+    route: no route | URL-ONLY — there is no page; the drafts it writes appear as cards in Sidebar > Queue
+    needs: The clock armed + WORKER_SECRET, and an AI key (OPENAI_API_KEY or LOVABLE_API_KEY) — with no AI key it silently drafts nothing at all.
+    trap: There is no screen for it anywhere. Follow-ups just appear in your Queue days later with no explanation of where they came from, or — with no AI key — never appear at all, and nothing ever tells you the feature exists.
+- [NEEDS_SETUP] Monthly sweep to wake up customers who went quiet 2–12 months ago
+    route: no route | URL-ONLY — no page; its drafts land in Sidebar > Queue
+    needs: The clock armed, and outreach settings complete (it skips owners who can't send).
+    trap: It runs once a month. If your clock is armed on the 3rd you wait 29 days for any sign it exists — indistinguishable from broken.
+- [NEEDS_SETUP] Overnight reply drafts — wake up to ready answers for everyone who wrote back
+    route: no route | URL-ONLY — no page; the drafts appear in Sidebar > Queue
+    needs: The clock armed + an AI key + inbound replies actually arriving (INBOUND_SECRET).
+    trap: If you approve one of those drafts without filling in the [YOU FILL] holes, send-email refuses it outright (supabase/functions/send-email/index.ts, placeholder gate) — correct behaviour, but in the Queue that refusal shows as the same meaningless plumbing error, so it looks like the send is broken rather than that you left a blank.
+- [PARTIAL] Scheduled customer emails — review requests, seasonal reminders, recall notices
+    route: /garvis/automations | Sidebar > More > Automation & status > Automations
+    needs: A customer list with dates (last service / last visit / purchase), plus the full email setup. The clock armed for it to run unattended.
+    trap: The email bodies ship with a literal "[review link]" placeholder in them (src/lib/garvis/automation/registry.ts, review_request default). If you don't edit that out, you mail customers a bracket instead of a link — the [YOU FILL] guard does not catch this spelling.
+- [NEEDS_SETUP] Email an invoice to a client
+    route: /garvis/money | Sidebar > More > Money > Money > "Send" on an invoice row
+    needs: A client email on the invoice, plus the full email setup.
+    trap: The invoice flips to "sent" the moment it is QUEUED, not when it is mailed. If the send then blocks in the Queue, your books say the client was billed and they never got anything — and the automatic invoice chaser will start dunning them.
+- [NEEDS_SETUP] Lead Markets: email yourself a digest of ranked leads, or send a sample pitch to a trade contractor
+    route: /garvis/lead-engine | Sidebar > More > Prospecting > Lead Markets > digest / sample-pitch fields on the panel
+    needs: Real leads already harvested for that market (the sample pitch refuses outright with "a sample pitch only sends real ones"), plus the full email setup.
+    trap: The digest marks leads 'delivered' in the database as soon as it queues (leadEngineRun.ts:397-399). If the approval then blocks, those leads are recorded as delivered and will not appear in the next digest — you lose them quietly.
+- [NEEDS_SETUP] Bounce, open, click tracking and automatic do-not-email list
+    route: no route | URL-ONLY — no page; the results show as engagement counts in Sidebar > More > Knowledge > Contacts
+    needs: RESEND_WEBHOOK_SECRET set on the server AND the webhook URL registered in the Resend dashboard. Neither is doable from inside this app.
+    trap: Without it you get zero opens, zero clicks, and — much worse — bounced addresses are never suppressed, so you keep mailing dead addresses and wreck your sending reputation with no warning anywhere in the UI.
+- [NEEDS_SETUP] Prospect replies stop the sequence automatically
+    route: no route | URL-ONLY — no page; replies appear in Sidebar > Queue's Messages lane
+    needs: INBOUND_SECRET plus an inbound/forwarding webhook pointed at the function. An AI key is optional (it falls back to keyword matching).
+    trap: Unconfigured, the app has no idea anyone replied — so the follow-up worker will keep nudging someone who already wrote back to your real mailbox. That is the single most embarrassing failure in this cluster and there is no warning light for it.
+- [WORKING] One-click unsubscribe that actually works
+    route: no route | URL-ONLY — it is the link inside every email you send; there is no page for it in the app
+    needs: Nothing beyond the email setup itself — it is automatic on every send.
+    trap: None for you. Worth knowing it is real: if a recipient clicks it, that address is permanently blocked and any future send to them will block in the Queue (again, with no readable reason).
+- [WORKING] Block or unblock one person by hand
+    route: /garvis/contacts | Sidebar > More > Knowledge > Contacts > open a contact > suppress / lift suppression
+    needs: Nothing — this works with no keys or setup at all.
+    trap: Suppression is checked at SEND time, not at draft time. You can happily compose and queue an email to someone you blocked; it dies at the last step, showing you the same unreadable error.
+- [PARTIAL] Email sequence "plays" — a three-touch campaign to one named person, from a business
+    route: /garvis/webs/:worldId | Sidebar > More > Build > Businesses > open a business > run a play
+    needs: A business with plays defined, a recipient name + email, the full email setup.
+    trap: It only ever queues touch 1. Touches 2 and 3 sit as drafts that nothing sends — the generic follow-up worker is deliberately kept away from them (sequence_stopped is set) — so a "3-touch sequence" silently delivers one email.
+  DEAD ENDS:
+   * Monthly client report email — src/lib/garvis/clients/clientReportRun.ts:170 (queueReportDelivery) writes the report email and its approval, but NOTHING in the app calls it: there is no button on Clients, Client revenue, or anywhere else (grep for queueReportDelivery / client_reports across src/**/*.tsx returns zero UI hits). Worse, src/lib/garvis/fleetView.ts:138 escalates you for a MISSING monthly report after the 7th of the month — the Fleet page nags you to do something the product gives you no way to do.
+   * Email idea studio — src/lib/garvis/emailStudio.ts is a large catalog of ready email types (just listed, open house, valuation, welcome, win-back, review ask) with worked examples, and src/components/garvis/EmailStudio.tsx wraps it. Neither is mounted on any real route: the only reference outside its own verify files is src/pages/dev/StudiosPreview.tsx, which is behind a DEV-only route (src/App.tsx, import.meta.env.DEV). In the shipped app this entire idea library is unreachable.
+   * Marketing brain's email asset — /garvis/marketing is NOT in navConfig (reachable only by typing the URL). Its generated email asset's "Publish" button does not use the send path at all: src/hooks/useMarketing.ts:113-126 opens a prefilled mailto composer in a new tab and then marks the asset "published" in the database. It records a send that never happened through this product.
+   * Two doors to the same segment send — "Send to a segment" on Contacts (src/components/garvis/BatchSendCard.tsx) and the Email board inside a business (src/components/garvis/canvas/EmailBoard.tsx) both call the same createBatch path. One is plain-text-only and mails ALL your contacts across every business; the other is brand-scoped and only mails that business's contacts. Nothing on either surface explains the difference.
+   * Three doors to the same cold pitch — Prospects "Build & send" (src/pages/Leads.tsx:71), Find clients "Build" (src/pages/WinClients.tsx:148), and Preview Engine "Queue send" (src/pages/PreviewEngine.tsx:154) all end in the same outreach_message + send_email approval. They differ only in whether they send immediately, queue silently, or pop a browser prompt for the address.
+   * Two doors for the same one prospect — on the Prospects page, the row button says "Build & send" (sends immediately) while opening the same row's drawer offers "Build & review" (queues without sending). Same prospect, same pitch, opposite consequences, with nothing warning you which one mails a stranger right now.
+   * Setup console vs Settings — the readiness checklist on Find clients and Health tells you to add your from-address and mailing address "in Setup" (src/lib/garvis/huntReadiness.ts:50-54), but /garvis/setup (src/pages/ClientReadiness.tsx) has no such fields; they live on /settings. The Setup console's own steps do link correctly to /settings (src/lib/garvis/readiness.ts:103), so the two checklists contradict each other.
+   * Retired doors that still answer — /garvis/inbox, /garvis/approvals and /inbox all redirect to the Queue (src/App.tsx). Harmless, but old links and older docs still name "Inbox" and "Approvals" as if they were separate places.
+   * No screen exists for four of the clock-driven email features — follow-ups, reactivation, overnight reply drafts and the bounce webhook have no page, no toggle, and no status light anywhere in navConfig. The only evidence they are alive is drafts appearing in the Queue; the only evidence they are dead is that nothing appears.
+
+##### Social posting and content channels
+This part of the product is for running short-video channels and social accounts end to end: it writes a script with real sources, makes the pictures, reads the narration aloud, renders a vertical video, and then posts it to your real TikTok / YouTube / Instagram / Facebook / LinkedIn accounts — but only after you personally press Approve in the Queue. There is exactly ONE way a post ever reaches a real account: something creates a post row plus a "Publish post" card in your Queue (Sidebar > Queue); you approve it; the app calls one server function (supabase/functions/social-publish/index.ts) which re-checks everything and hands the post to Ayrshare, an outside service that holds the actual connections to your social accounts. Nothing in this app logs into TikTok or Instagram directly. So the single thing that makes all of this real is: you sign up at Ayrshare, link your accounts THERE, and paste that Ayrshare API key into Sidebar > More > Account > Settings > Connections. Until that key exists, every studio still lets you write, draft, and render — and then the publish step stops with "No social account connected." The second thing that matters is money: Ayrshare's free tier posts IMAGES ONLY, and this whole channel engine produces mp4 videos, so the flagship path needs a paid Ayrshare plan or it will fail at the last step. The third thing is server keys you do not control from inside the app (OPENAI_API_KEY for the pictures and voice, SHOTSTACK_API_KEY for the video render) — without them "Produce" stops with a named message telling you which key is missing. Everything that works unattended (posting an approved post while your laptop is closed, pulling back view counts, the daily auto-draft) depends on a background clock that must be armed once from Sidebar > More > Automation & status > Health.
+
+- [WORKING] The Channels list — see every content channel you run and how each one is doing
+    route: /garvis/channels | Sidebar > Channels
+    needs: nothing — it opens and shows either your channels or an empty state with the one next step
+    trap: It only finds channel operations built from the 'Content Channel' template. If you made social posts anywhere else in the app (the Social board, the legacy Marketing page), this page will still say 'No channel operation yet' and you will think nothing you did was saved.
+- [WORKING] Start a channel — one button builds the whole channel operation
+    route: /garvis/channels (button) then /garvis/webs/<new world id> | Sidebar > Channels > 'Start a channel'
+    needs: nothing to create it; everything downstream needs keys
+    trap: It creates the workspace but NOT a channel. The toast says 'pick a channel preset inside' and you land on a page where the only thing to press is a small dashed chip like 'Caregiver / health'. If you do not press one of those chips, the whole studio stays blank and looks broken.
+- [NEEDS_SETUP] Fact Channel Studio — write a cited episode script (the daily first step)
+    route: /garvis/webs/<world id> (panel, no route of its own) | Sidebar > Channels > click your channel card > the page opens on the studio > 'Draft a cited episode'
+    needs: the fact-script function deployed and an AI provider key set as an edge secret; enough credit under the daily/monthly spend cap
+    trap: If the AI key is missing you get a red 'model error' or 'The script writer (fact-script)…' toast that reads like a bug rather than 'nobody set the key'. And if the model comes back with no real sources, the episode is saved anyway but stamped 'Unverified claims' in amber — easy to miss, and you will have produced a video off claims nobody checked.
+- [NEEDS_SETUP] Produce the episode — pictures, narration, captions, a finished vertical mp4
+    route: /garvis/webs/<world id> (panel) | Sidebar > Channels > your channel > click an episode > 'Produce (illustrate → narrate → render)'
+    needs: OPENAI_API_KEY and SHOTSTACK_API_KEY (and optionally ELEVENLABS_API_KEY for word-exact captions) set as server secrets — these are NOT settable from inside the app, only by whoever runs the backend
+    trap: This is the step that costs real money and takes minutes. The progress line says 'Rendering… (working)' and after about 3 minutes it gives up with 'taking longer than expected'. The video is usually finished anyway — you have to come back and press the small grey 'Check render' link on the episode. Most people will assume it failed and press Produce again, paying twice.
+- [NEEDS_SETUP] Queue the finished video to your accounts
+    route: /garvis/webs/<world id> (panel) then /garvis/queue | Sidebar > Channels > your channel > open the rendered episode > 'Queue to tiktok + youtube + instagram' > then Sidebar > Queue > Approve
+    needs: an Ayrshare account with your TikTok/YouTube/Instagram linked there, and its API key pasted into Settings > Connections — on a PAID Ayrshare plan, because videos are not allowed on the free tier
+    trap: The free Ayrshare plan is images only. The app only WARNS about this ('Video detected — that needs a paid provider tier') in small grey text at queue time, then lets you approve, and the post dies at the provider with 'Provider error 4xx'. You will have paid for the script, the art, the voice and the render before anything tells you the account you connected cannot accept video.
+- [NEEDS_SETUP] Auto-draft daily — a new cited script lands every morning without you asking
+    route: /garvis/webs/<world id> (chip inside the studio) | Sidebar > Channels > your channel > the small 'auto-draft daily: off' pill next to the channel name
+    needs: the background clock armed once from Sidebar > More > Automation & status > Health (the master switch), plus the same AI key and credit as manual drafting
+    trap: The pill flips to green and says 'Daily auto-draft ON' even when the clock was never armed. Nothing will ever appear, and the pill will keep saying ON. There is no warning on the pill itself — the truth is on a completely different page (Health).
+- [NEEDS_SETUP] Hook lab — make a B-cut of the same video with a different opening line
+    route: /garvis/webs/<world id> (panel) | Sidebar > Channels > your channel > open a rendered episode > 'B-cut with hook 2'
+    needs: same as Produce — the voice and render keys; the parent episode must already be rendered
+    trap: Pressing it immediately starts a full paid produce run with no confirmation. There is no 'are you sure' and no price shown.
+- [WORKING] Shot list — film the episode yourself instead of using the AI voice
+    route: /garvis/webs/<world id> (panel) | Sidebar > Channels > your channel > open an episode > 'Shot list (film it yourself)'
+    needs: nothing
+    trap: It silently drops a .txt into your Downloads folder with no on-screen confirmation — it looks like the button did nothing.
+- [NEEDS_SETUP] UGC Studio — upload your own filmed clips and have them cut into a post
+    route: /garvis/webs/<world id> (panel below the Fact Channel Studio) | Sidebar > Channels > your channel > scroll down to 'UGC Studio' > 'Upload takes'
+    needs: SHOTSTACK_API_KEY for the render, and the Ayrshare connection (paid tier) to actually post the result
+    trap: Your uploaded clips and the assembled edit live only in the open browser tab. Close or refresh the page before you press 'Queue for approval' and everything you set up is gone — there is no draft saved anywhere.
+- [PARTIAL] Reel Studio — brainstorm short-video angles, scripts and storyboards
+    route: /garvis/webs/<world id> (panel, bottom of the channel page) | Sidebar > Channels > your channel > scroll to the bottom 'Reel Studio'
+    needs: nothing
+    trap: It looks like the most finished studio on the page (three tidy steps, instant results) so people start here — and then discover it is a notepad. Anything you build here has to be re-done in the Fact Channel Studio above to become an actual video.
+- [NEEDS_SETUP] Write a post by hand and send it to your accounts
+    route: /garvis/webs/<world id> (the 'Social' area of a business, not a channel) | Sidebar > More > Build > Businesses > pick a business > pick its Social area > 'Post to her accounts'
+    needs: the Ayrshare key in Settings > Connections
+    trap: When no account is connected it shows a yellow box with an underlined 'Settings → Connections' that LOOKS like a link but does not go there — it tries an OAuth flow that the server rejects ('Unsupported OAuth provider "ayrshare"', supabase/functions/oauth/index.ts line 34) and just shows a small toast. You click it, nothing happens, and you conclude the app is broken.
+- [NEEDS_SETUP] Social board — spread out lots of post ideas as pictures, compare, then queue the best
+    route: /garvis/webs/<world id> ('Social' area) — also inside the Canvas | Sidebar > More > Build > Businesses > pick a business > its Social area (or Sidebar > More > Build > Canvas > stand in an area > 'Work in a studio' > Social)
+    needs: OPENAI_API_KEY for the imagery; the Ayrshare key to post
+    trap: This board is not visible from the Channels page at all. Work you do here never appears in your channel list, so it feels like two unrelated apps.
+- [NEEDS_SETUP] Content week — the machine writes a whole week of posts every Monday for you to approve as one decision
+    route: inside the Social board's chip strip | Sidebar > More > Build > Businesses > pick a business > its Social area > the 'Content week' chip at the top of the board
+    needs: the background clock armed (Health), an AI key, and the Ayrshare connection
+    trap: This is the one place where approving ONE card causes many posts to go out later on their own. If you expect to see each post again before it publishes, you will not — they go straight out under a daily cap (default 4/day).
+- [WORKING] Connect your social accounts (the Ayrshare key) — the thing everything else depends on
+    route: /settings | Sidebar > More > Account > Settings > scroll to 'Connections' > 'Ayrshare (social)'
+    needs: an Ayrshare account with your TikTok / YouTube / Instagram / Facebook / LinkedIn linked inside Ayrshare first — this app never sees those logins
+    trap: Pasting the key makes the app say 'connected' even if you have not linked a single social account inside Ayrshare yet. Posts will then fail at the provider with an error that mentions Ayrshare, not the missing account link, and it will look like the app broke.
+- [WORKING] Send each business's posts to its OWN accounts
+    route: /settings (panel under the connected Ayrshare card) | Sidebar > More > Account > Settings > Connections > Ayrshare (connected) > the destinations panel
+    needs: an Ayrshare plan that supports multiple profiles, and a Profile-Key per business
+    trap: It is all-or-nothing. The moment you map ONE business, every other business must be mapped too — an unmapped one stops dead with 'This business has no social destination mapped'. One helpful mapping silently breaks everything else you post.
+- [WORKING] The Queue — the single place you say yes, and the only way anything reaches a real account
+    route: /garvis/queue | Sidebar > Queue > find the 'Publish post' card > Approve (or press 'a')
+    needs: nothing to see it; the Ayrshare key for the approve to succeed
+    trap: If the publish is refused (no connection, unlabelled AI media, a stale fact, an edited post), the card flips back to pending and the reason arrives as a toast that disappears in a few seconds. The card gives no lasting sign of why it did not go out.
+- [NEEDS_SETUP] Posting while you are asleep — approved posts go out on schedule without the app open
+    route: no route (background) | URL-ONLY — there is no page for it; you arm it once at Sidebar > More > Automation & status > Health
+    needs: the master switch armed once (Health page) with the functions URL and the shared secret
+    trap: Until it is armed, a post you approved and scheduled for 'tonight at 8' simply never goes out — and the app will keep showing it as 'queued' forever with no error anywhere.
+- [NEEDS_SETUP] Reading the numbers back — views, likes, watch time, and which hooks are working
+    route: shown inside the studio and the publisher; refreshed by a 'sync results' link | Sidebar > Channels > your channel (the pulse line and per-episode numbers appear on their own) — or the tiny 'sync results' link in the Social publisher
+    needs: the Ayrshare key AND an Ayrshare Premium/Business plan — analytics is not on the free tier; plus the background clock for the automatic 6-hour refresh
+    trap: On a cheaper Ayrshare plan it says 'Post analytics needs an Ayrshare Premium/Business plan'. The channel then shows no views forever, the 'winner' badges never appear, and the learning loop quietly has nothing to learn from — the studio looks alive but is flying blind.
+- [PARTIAL] Plan several channels at once (the 'vertical empire' planner)
+    route: /garvis/channels (collapsed panel) | Sidebar > Channels > 'Plan verticals'
+    needs: everything the single-channel path needs, multiplied — AI key, credit under the spend cap, and later the render keys
+    trap: Pressing Implement for 7 verticals fires 7 AI script drafts back to back. The default spend guard is $10/day, so the later ones fail with a credit/cap message and you are left with a half-built set of channels and red steps you have to reconcile by hand.
+  DEAD ENDS:
+   * The four studios that do all the real work (Fact Channel, UGC, Reel, Social board + publisher) have NO route of their own. They are panels inside /garvis/webs/<world id>, which is not in navConfig. The only supported ways in are Sidebar > Channels (content channels only) or Sidebar > More > Build > Businesses. If you bookmark or share anything, you are sharing a long world id URL.
+   * src/components/garvis/SocialPublisher.tsx line 95: the 'Settings → Connections' text that looks like a link calls startOAuth('ayrshare'), which supabase/functions/oauth/index.ts rejects outright ('Unsupported OAuth provider'). It never navigates. It shows a toast telling you to go to Settings yourself. This is the most likely single click to make the operator conclude 'it doesn't work'.
+   * /garvis/marketing (src/pages/Marketing.tsx) is a second, older door that also queues real social posts through Ayrshare (src/hooks/useMarketing.ts line 101). It is NOT in navConfig — it is reachable only by typing the URL, by the command palette entry literally labelled 'Marketing (legacy)' (src/components/CommandPalette.tsx line 90), or by a link a background action leaves behind (src/lib/garvis/actionRegistry.ts line 123). Posts queued there are invisible from Channels.
+   * The Social board is one component behind THREE doors: the Social area of a business (src/pages/WorkWeb.tsx line 944), the Marketing canvas (src/components/garvis/canvas/MarketingCanvas.tsx line 161), and the canvas 'Work in a studio' chip (src/components/garvis/canvas/StudioDock.tsx line 54). Same board, same data, three different-looking routes.
+   * Reel Studio duplicates the first half of Fact Channel Studio (pick an angle, write beats) but dead-ends at 'Save as draft' — there is no bridge from a Reel Studio storyboard to an episode, a render, or a post. It sits directly underneath the studio that CAN do all of that.
+   * The Channels page and the Social board are two separate worlds of social content that never reference each other. A 'social' flavored business area (board + publisher) is completely invisible from Sidebar > Channels, and a content channel is invisible from the Social board.
+   * Channels, Businesses and Workshops are three different front doors that all end up at the same /garvis/webs/<world id> page: Workshops even deep-links to it with ?area=...&workshop=1 (src/pages/Workshops.tsx line 82) and calls the same content_growth studio 'Reel Workshop' (src/lib/garvis/workshops.ts line 135) — a fourth name for the same room.
+   * /dev/studios and /dev/board (src/pages/dev/StudiosPreview.tsx, src/pages/dev/BoardPreview.tsx) render these same studios against fake data. They are dev-build only and never reachable in production, but they are extra copies of the same surfaces in the codebase.
+   * There is no page anywhere that shows 'here is what is missing before a post can go out'. The Ayrshare connection lives in Settings, the AI/render keys live only on the server and are hinted at in toasts, the background clock lives on Health, and the Ayrshare plan limit (images only, analytics off) is never stated as a requirement — only as a grey warning at the moment you queue.
+
+##### Running client work and getting paid
+This is the part of the app that is supposed to carry a client from "they said yes" all the way to "they paid me and got a report." In practice it is four separate desks that never talk to each other. Desk one, "Clients" (the Client book), is a notepad: who your client is, what you agreed to do, and a tick-list of things you still need from them. Desk two, "Client revenue," is a completely different list of completely different people: the ones you charge a monthly or one-time fee, with your Stripe payment links and your MRR total. Desk three, "Money," is plain invoices you write, email (after approving them), and mark paid by hand. Desk four, "Fleet," is an alarm board that tells you a client's monthly report is overdue or a request is going stale — but there is no page anywhere in the app that lets you write a client report or open a change request, so those alarms can never be cleared. The one genuinely automatic path is narrow: a prospect clicking "Make it mine" on their demo site goes through a checkout that records the sale and can publish their site by itself. Every other way you get paid — including the "copy payment link" button on the Client revenue page — leaves you doing the bookkeeping by hand, because that copied link carries no identifier Stripe can hand back. Nothing charges a card from inside the app; Stripe's own hosted pages do that, and only if you have pasted your payment links in first. And the polite late-payment chaser, which is the most valuable thing here, is switched off out of the box in three different ways at once.
+
+- [PARTIAL] Client book — write down who your client is, what you agreed to do for them, and tick off what you still need from them (logo, logins, photos)
+    route: /garvis/client-book | Sidebar > Clients
+    needs: Nothing to record a client. An AI key on the cluster-chat function only for the optional 'their business world' draft.
+    trap: This page has NOTHING to do with getting paid. A client you enter here never appears on 'Client revenue', never gets a payment link, never counts toward MRR, and can never be invoiced from here. There is not one link between the two pages in either direction (verified across src/pages/ClientBook.tsx and src/pages/ClientBilling.tsx). The operator will reasonably assume adding a client here starts the billing.
+- [PARTIAL] Client revenue — save your two Stripe payment links, record a sale, copy the link to send the client, mark them paid, and watch your monthly recurring revenue add up
+    route: /garvis/client-billing | Sidebar > More > Money > Client revenue
+    needs: Two Stripe Payment Links created by hand in your own Stripe dashboard and pasted into the two boxes. Nothing else. (Payment links are free of any app secret — Stripe hosts them.)
+    trap: The 'Link' (copy payment link) button copies your RAW Stripe link with no client identifier attached. src/pages/ClientBilling.tsx copyLink() just does linkFor(row.tier); it never calls buildPaymentUrl from src/lib/garvis/billing/clientSale.ts. When the client pays through that copied link, supabase/functions/stripe-webhook/index.ts handleClientSale() sees no client_reference_id, returns false, and the payment is NEVER matched to the row. The client's money lands in Stripe and the app shows them as still 'pending' forever. The operator sees the payment in Stripe, sees 'pending' here, and concludes the app is broken. They must click 'Mark paid' by hand every single time.
+- [NEEDS_SETUP] Auto-record the sale and publish their site the moment a client pays
+    route: no route (background — supabase/functions/stripe-webhook/index.ts) | URL-ONLY — there is no page. Instructions are printed as small grey text inside the 'Your Stripe payment links' panel on /garvis/client-billing.
+    needs: Deploy the function with JWT verification off; set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET; add the endpoint in Stripe > Developers > Webhooks for checkout.session.completed; plus WORKER_SECRET for the auto-publish leg. Four separate technical steps in the Stripe and Supabase dashboards.
+    trap: Even after all four steps, it only fires for payments started from the client's demo page ('Make it mine'). A payment made through the link the operator copied from the Client revenue table is invisible to it (see above). So the operator does the setup, tests it with their own copied link, sees nothing happen, and concludes it doesn't work.
+- [WORKING] 'Make it mine' — the client, on their own demo site, picks a plan and pays; a pending sale appears in your book automatically
+    route: /preview-site/:slug (public, no login) | URL-ONLY — this is the link the business owner opens from your outreach email. The operator never navigates here from the sidebar.
+    needs: The matching payment link saved on /garvis/client-billing, and the demo site published. Nothing else for the pending row to appear.
+    trap: It only exists on a demo site the operator built and sent. If the operator is billing a client they already had (not one they pitched with a generated demo), this path doesn't exist for them at all — and it is the only automatic one.
+- [WORKING] 'Mark won' — on a client's positive reply, one click turns them into a paying client row, creates their business world, pins their service package, and mints a draft invoice for one-time deals
+    route: /garvis/queue (the button sits on a positive pitch reply) | Sidebar > Queue, then on a reply lane item click 'Mark won'
+    needs: Nothing. Payment link optional — if it's missing the panel says so and links you to set it.
+    trap: The success panel says 'Open Clients' and 'the Clients page' but links to /garvis/client-billing, which the sidebar calls 'Client revenue'. Meanwhile the sidebar item actually named 'Clients' is a different page entirely (/garvis/client-book). The operator clicks 'Clients' in the sidebar looking for the client they just won and finds an empty page.
+- [PARTIAL] Per-client setup panel — hook up this client's accounts (domain, email sender, text number, missed-call line, booking, payments) with a green/amber checklist
+    route: no route (a panel that opens under a row on /garvis/client-billing) | Sidebar > More > Money > Client revenue, then click 'Set up' on a client's row
+    needs: Nothing to open it. Each line then needs whatever that connector needs (a verified sending domain, a Twilio number, etc.).
+    trap: Two of the checklist's 'Connect' buttons are circular or wrong. 'Payments' sends you to /garvis/client-billing — the page you are already standing on. 'Domain' sends you to /garvis/setup, and the Setup console has no domain step at all (src/lib/garvis/readiness.ts has steps for clock, world, brand, contacts, email, sending switch, e-sign and MLS — no domain). The operator clicks 'Set up domain', lands somewhere with no domain anything, and concludes the button is broken. It is.
+- [PARTIAL] Give a client their own text number so their reminders come from their line, not a shared one
+    route: no route (inside the per-client 'Set up' panel on /garvis/client-billing) | Sidebar > More > Money > Client revenue > 'Set up' on a row > 'Their Twilio number'
+    needs: A Twilio number the operator bought themselves, plus the Twilio secrets on the send-sms function, plus the clock armed for anything to actually fire.
+    trap: Typing a number here turns the checklist line green immediately, which reads as 'texts now work.' Nothing is validated, nothing is bought, and nothing sends until Twilio credentials exist on the backend and the heartbeat clock is armed. Green here does not mean working.
+- [WORKING] Copy an industry-fitted automation pitch (with honest ROI stats) to paste into an email when upselling an existing client
+    route: no route (inside the per-client 'Set up' panel on /garvis/client-billing) | Sidebar > More > Money > Client revenue > 'Set up' on a row > 'Copy as pitch'
+    needs: Nothing.
+    trap: It is buried two clicks deep inside a per-row panel on a page the operator has to open 'More' to even find. Most operators will never discover it exists.
+- [PARTIAL] Money — write an invoice in a minute, send it (after you approve it), and mark it paid when the money lands
+    route: /garvis/money | Sidebar > More > Money > Money
+    needs: To create: nothing. To actually send: RESEND_API_KEY on the send-email function, a verified sending domain, your business's physical address, and the outbound switch turned ON in Settings — all four, or the approved send is blocked at send time.
+    trap: Pressing 'Queue send' instantly flips the invoice to 'sent' on screen. It has NOT been sent — it is sitting in the Queue waiting for the operator to approve it, and after that it still needs the email stack configured. The operator reads 'sent', waits for payment, and never learns the client was never billed. (The code comments acknowledge this is deliberate optimism; the label doesn't.)
+- [NEEDS_SETUP] The chaser — politely asks your late-paying clients for the money, escalating over two weeks, while you sleep
+    route: no route (background — supabase/functions/invoice-chase/index.ts; its health shows as a small warning line at the top of /garvis/money) | URL-ONLY / no page. Symptoms only: a warning strip on Sidebar > More > Money > Money, and the master switch on Sidebar > More > Automation & status > Health.
+    needs: Arm the clock from Health (which asks the operator to type a functions base URL and a worker secret), set CRON_SECRET, turn the outbound switch ON in Settings, and give each invoice a due date — no due date means no chasing, ever.
+    trap: With the outbound switch off — which is the default — the chaser wakes up daily, looks at every overdue invoice, and skips all of them without a word. Nothing appears in the Queue, nothing appears on Money, no error is shown anywhere. The operator sees an invoice go two weeks past due with total silence and concludes the chaser doesn't exist.
+- [WORKING] Setup console — one screen saying whether you are actually set up to operate a client's business, with a button to each fix
+    route: /garvis/setup | Sidebar > More > Automation & status > Setup
+    needs: Nothing — it reads what exists.
+    trap: It is titled 'Setup console' and reads as THE setup list, but it has no step for Stripe, no step for payment links, and no step for a domain. An operator who works this page to all-green still cannot take a single dollar. It also says 'her business' throughout, which is confusing if the client isn't a she.
+- [PARTIAL] The fleet — one board showing only the clients who need something from you today (site down, automation stuck, request going stale, report overdue)
+    route: /garvis/fleet | Sidebar > More > Automation & status > Fleet
+    needs: Clients on the books with a world linked. A client recorded by hand on Client revenue has world_id NULL (only 'Mark won' ever sets it), so nothing about them can be attributed here.
+    trap: It tells you a report is due or a request is aging and gives you nowhere to go and nothing to press. There is no page in the entire app for either one. The alarm can never be cleared, so it sits there permanently — which trains the operator to ignore the whole board.
+- [DEAD] Monthly client report — compile what you actually did for a client this month, from their own records, and send it to them
+    route: no route | URL-ONLY — and not even that. There is no page, no button and no link anywhere in the app.
+    needs: A page that doesn't exist.
+    trap: The Fleet board raises a 'Report due' alarm for every client every month, and a 'Report stuck' alarm too — for a thing the operator has no way whatsoever to produce. This is the single most demoralising item in the cluster: the app nags you for homework it gives you no pencil for.
+- [DEAD] Change requests — a durable record of 'the client asked for X', with a lifecycle, time and cost attribution
+    route: no route | URL-ONLY — no page. The only way a request is ever born is a client replying to an email, if inbound mail is wired up.
+    needs: For the one working birth path: INBOUND_SECRET on resend-inbound, inbound email routing configured at Resend, and the sender must already be a contact with a world_id AND a paying client_subscriptions row for that same world.
+    trap: Requests can be born but never handled. There is no screen that lists them, no way to move one to 'in progress' or 'done', and no way to close one. They accumulate invisibly and then show up on the Fleet board as 'Request aging' warnings that get older forever.
+- [PARTIAL] Service packages — which version of your offer each client is on, and what it should have set up for them
+    route: no route (pinned silently at close-won; visible only as a 'Package drift' alarm on /garvis/fleet) | URL-ONLY / invisible. The pin happens by itself when you click 'Mark won' in the Queue.
+    needs: Migrations applied; the client created via 'Mark won' (a hand-recorded sale on Client revenue gets no pin at all).
+    trap: The Fleet board can tell you a client has 'package drift' and there is no page where you can see the package, see the drift, or fix it. Also: the app only ever offers two prices, hardcoded at $1,500 one-time and $500/month, with no way in the UI to add a third offer.
+- [NEEDS_SETUP] Subscription — your own bill for using this app (upgrade to Pro, buy credits, manage plan)
+    route: /billing | Sidebar > More > Account > Subscription
+    needs: STRIPE_SECRET_KEY and STRIPE_PRO_PRICE_ID on the backend (plus STRIPE_CREDITS_PRICE_ID for top-ups).
+    trap: This is the app charging YOU. It is not client money and has nothing to do with the rest of this cluster, but it is the third thing in the sidebar with a money name — alongside 'Client revenue' and 'Money'. An operator looking for 'where do I bill my client' has a one-in-three chance of landing here.
+- [WORKING] Carry a won prospect straight into billing with their name and email already filled in
+    route: /garvis/client-billing?business=…&email=…&tier=… | Sidebar > Prospects, open a prospect, click the 'won' action (also from Sidebar > More > Prospecting > Find clients)
+    needs: Nothing.
+    trap: It prefills the form but does not submit it. The operator arrives, sees the name already typed, assumes it saved, navigates away, and the sale is never recorded. Nothing on the page says 'now press Record'.
+  DEAD ENDS:
+   * Monthly client report: full table (app_0120_client_reports.sql), full compile logic and a verify suite in src/lib/garvis/clients/clientReport.ts and clientReportRun.ts — and not one caller anywhere in src/ or supabase/functions/. No page, no route, no button. Yet /garvis/fleet raises 'Report due' and 'Report stuck' alarms about it, permanently.
+   * Change requests: full table (app_0119_change_requests.sql) and full lifecycle logic in src/lib/garvis/clients/changeRequests*.ts, with no UI to create, list, advance or close one. The only writer in the whole codebase is supabase/functions/resend-inbound/index.ts. /garvis/fleet raises 'Request aging' alarms that can never be cleared.
+   * Package lifecycle: src/lib/garvis/billing/packageLifecycleRun.ts (drift detection, migration plans, termination plans — ~430 lines) has zero callers. There is no screen to see, change or end a client's package, though /garvis/fleet reports drift against it.
+   * 'Set up domain' on the per-client connections checklist (src/lib/garvis/clients/connections.ts line 27) points at /garvis/setup, which has no domain step whatsoever (src/lib/garvis/readiness.ts). A button that lands nowhere useful.
+   * 'Send payment link' on the same checklist (connections.ts line 32) points at /garvis/client-billing — the page the panel is already open on. A button that goes to where you already are.
+   * Three connectors on the per-client checklist (Google Business, Calendar sync, E-signatures) are marked built:false / 'Coming soon' and do nothing — they are listed as checklist lines that can never be completed.
+   * The chaser, the Stripe webhook and client checkout are three of the most valuable things in this cluster and none of them has a page, a sidebar entry, or a setup wizard. Their configuration instructions exist only as small grey paragraph text inside a panel on /garvis/client-billing and as a technical form on /garvis/health.
+
+##### Marketing for a business (canvas, postcards, campaigns)
+This part of the product is for making the actual marketing a small business hands out or posts: postcards you print and mail, social captions, emails, a short video, a logo/brand look, and (for a realtor) posts built only from facts you have personally verified. It is NOT one page. Everything real lives inside a "business" you create first at Sidebar > More > Build > Businesses, and then inside that business it splits into two completely different-looking worlds depending on which template you picked: a dark "canvas" of floating bubbles (postcards, social, email, people nearby, video, market analysis, branding), or a plain Campaign Studio built for real-estate posts. Nothing in this cluster ever sends or mails anything by itself — a postcard is something you print on paper and take to a mail house, a social post goes into the Queue and only posts after you approve it AND only if a social account is connected, an email goes into the Queue and only sends if an email key and a verified sending domain exist. The old standalone "Marketing worker" page that writes a whole campaign in one shot (/garvis/marketing) still works but is not in the sidebar at all — it is reachable only by typing the URL or by the Cmd-K palette, where it is labelled "legacy". The single biggest broken-feeling thing: the glowing centre of the canvas invites you to "Set up your first announcement", you fill in the address, price, beds and photo — and none of it reaches any postcard, post or email, because the function that was supposed to turn that form into the whole marketing set is never called by anything.
+
+- [PARTIAL] Make a whole marketing campaign from one sentence (strategy, 2-week calendar, 5 social posts, a launch email, landing-page copy) and approve each piece
+    route: /garvis/marketing | URL-ONLY — type /garvis/marketing, or press Cmd-K and pick "Marketing (legacy)"
+    needs: An AI key pasted in Settings (or cloud credits). Nothing else — no table setup, no connection.
+    trap: Pressing Publish on the email or landing-page piece just opens your mail app with the text prefilled (src/lib/garvis/channels.ts buildShareUrl) and then immediately stamps the item "published" in the list — so the app says it went out when you may never have hit send. Social pieces behave differently again (they go to the Queue), so the same green button means two different things.
+- [WORKING] Create a ready-made marketing business in one click (the 'Real Estate Marketing', 'Mom Real Estate Marketing' or 'App Marketing' starter)
+    route: /garvis/webs | Sidebar > More > Build > Businesses > "Create business" on a template card
+    needs: Nothing. This is the one door in the cluster that works on a fresh account with zero setup.
+    trap: Six template cards, three of them marketing-shaped with near-identical names. "Mom Real Estate Marketing" (16 areas) and "Real Estate Marketing" (5 areas) open pages that look like different products — one is a canvas of bubbles, the other is a plain campaign studio with no canvas at all. Nothing on the cards warns you.
+- [WORKING] Open your business and see the marketing canvas — the round 'what am I marketing' centre with Postcards / Social / Email / People nearby / Video / Market analysis / Branding orbiting it
+    route: /garvis/webs/:worldId | Sidebar > More > Build > Businesses > click your business card
+    needs: A business created first. The canvas itself needs nothing to draw.
+    trap: Half the real machinery (the farm lists, the older postcard designer, the MLS connect form, the social publisher) is hidden behind one small grey "Advanced — the studios & areas" link under the canvas. And if you created the 5-area "Real Estate Marketing" business instead, this canvas never appears at all — so advice about "tap the postcard bubble" simply does not apply to your screen.
+- [DEAD] Tell the canvas what you're announcing — address, price, beds/baths, open-house time, your name and phone, plus a photo
+    route: /garvis/webs/:worldId (the glowing centre of the canvas) | Sidebar > More > Build > Businesses > your business > tap the glowing centre "Set up your first announcement"
+    needs: Nothing to fill it in. Nothing downstream consumes it.
+    trap: This is THE most prominent thing on the page, it says "tap to begin — takes a minute", and on save it toasts "Set — now open any node to make a piece." You then open Postcards and your address, your price and your photo are nowhere. This single dead wire is the most likely cause of "anytime I try to do anything I feel like it doesn't work."
+- [WORKING] Make postcards — pick a kind, type an idea, get a real 6x9 front-and-back card, spin variations, edit the words, star the keepers, print or export to PDF
+    route: /garvis/webs/:worldId (Postcards board) | Sidebar > More > Build > Businesses > your business > tap the 📮 Postcards bubble
+    needs: Nothing to make a plain branded card. For AI imagery: OPENAI_API_KEY set as a Supabase secret. For the typed idea to reach the actual words: an AI provider key (ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY) on the board-copy function. For it to look like HER business: a brand kit and uploaded photos in the business first.
+    trap: With no keys set, you type an idea, press Make, and get a generic template card — your words are silently dropped. src/lib/garvis/boardCopyRun.ts explains this exactly ONCE per browser session and then stays quiet forever, so every card after the first looks like the app ignoring you.
+- [WORKING] Send a starred postcard design to the mail run, and log how many you actually mailed
+    route: /garvis/webs/:worldId (Postcards board > click a card) | Sidebar > More > Build > Businesses > your business > 📮 Postcards > click a card > "Use for mail run" / "Log mailed"
+    needs: Nothing beyond having made a card. Logging is your honest report of what you physically mailed.
+    trap: "Use for mail run" only saves a design and tells you to go to "People nearby" — but the addressed merge-and-print is NOT in People nearby, it's in a different panel behind Advanced. You can follow the instruction exactly and find nothing.
+- [WORKING] The older postcard designer — one card at a time, pick a concept, type the one offer, add a tracking link that becomes the QR, print or PDF, and keep a mail log
+    route: /garvis/webs/:worldId (Direct Mail > Creative area) | Sidebar > More > Build > Businesses > your business > Advanced > click "Creative" under Direct Mail
+    needs: Nothing. It builds from the business's brand kit and uploaded photos.
+    trap: It is a second, older, completely separate postcard tool from the Postcards bubble on the canvas — different cards, different saved state, different buttons. Clicking the obvious parent area "Direct Mail" does NOT show it (that area is a 'launch' area, so you get a send-an-email box instead); you have to know to click the child called "Creative".
+- [NEEDS_SETUP] Build a mailing list of real households for a neighbourhood, see how many will actually receive mail after do-not-mail and bad addresses, check whether the farm is worth the money, and download the address list for a mail house
+    route: /garvis/webs/:worldId (People nearby sheet) | Sidebar > More > Build > Businesses > your business > tap the 📍 People nearby bubble
+    needs: A CSV of households exported from somewhere else — PropertyRadar, Cole, or a county record download. The app cannot find the addresses for you.
+    trap: It is the only bubble that is useless on arrival, and the note at the bottom tells you to "Print the addressed run in Advanced > Farm" — there is no area called "Farm" anywhere in the sidebar or the area tree.
+- [WORKING] Merge your saved postcard design with a neighbourhood list into an addressed, do-not-mail-checked print run, then log it as printed
+    route: /garvis/webs/:worldId (Direct Mail > Creative area, below the designer) | Sidebar > More > Build > Businesses > your business > Advanced > "Creative" under Direct Mail > scroll to "Merge & print"
+    needs: (1) at least one saved postcard design in this business, (2) a territory with imported households.
+    trap: The two areas actually NAMED for this — "Mailing Lists" and the master "Mailing Lists" at the bottom — are 'audience' areas, so this panel refuses to render on them (the condition at src/pages/WorkWeb.tsx:923 requires archetype 'studio'). You click the thing called Mailing Lists, see nothing but an upload button, and conclude the feature does not exist.
+- [NEEDS_SETUP] Make social captions for Instagram / Facebook / LinkedIn / X, compare them side by side, spin variations, then queue one to post (or schedule it)
+    route: /garvis/webs/:worldId (Social board) | Sidebar > More > Build > Businesses > your business > tap the 📱 Social posts bubble (or Advanced > "Social Content")
+    needs: An Ayrshare account connected for your user before anything can actually post. Writing better captions also needs the board-copy AI key.
+    trap: Queueing succeeds and the toast says "approve it in your Queue" — so it feels done. You approve it in the Queue, and only then does it fail for a missing social connection. The failure happens two screens away from the button you pressed.
+- [NEEDS_SETUP] Write an email (welcome, referral ask, follow-up…), compare subject-line angles, then send it to a segment of your contacts
+    route: /garvis/webs/:worldId (Email board) | Sidebar > More > Build > Businesses > your business > tap the ✉️ Email bubble
+    needs: RESEND_API_KEY on the project, a verified sending domain (Sidebar > More > Automation & status > Sending domains), and contacts in the segment you pick.
+    trap: In the 16-area real-estate business, the area literally called "Email Newsletter" does NOT show this board — it is a 'loop' area, and the board only renders on a 'studio' area with the email flavor (src/pages/WorkWeb.tsx:952). So the named door is empty and the working door is an unlabelled bubble on the canvas.
+- [NEEDS_SETUP] See real market numbers — active listings, sold in 12 months, median close price, days on market, price per sqft, months of supply — filtered by ZIP
+    route: /garvis/webs/:worldId (Market analysis sheet) | Sidebar > More > Build > Businesses > your business > tap the 📊 Market analysis bubble
+    needs: An MLS/RESO Web API feed connected and synced first (see next item).
+    trap: The empty state says "Connect your MLS / RESO feed in Advanced > Market data" — but there is no item called "Market data"; you have to click Advanced, then the area called "Lake Geneva Market", and scroll. Also, this sheet reads listings with NO business filter at all (src/components/garvis/canvas/MarketingCanvas.tsx:689), so if you run two realtor businesses their markets merge into one set of numbers.
+- [NEEDS_SETUP] Connect your MLS feed (RESO Web API URL + token) and pull listings in, so prices/beds/baths auto-fill and the market stats are real
+    route: /garvis/webs/:worldId (the market intel area) | Sidebar > More > Build > Businesses > your business > Advanced > click "Lake Geneva Market" (the market area)
+    needs: An MLS/RESO feed base URL and a bearer token from your MLS provider. Most agents do not have these lying around — this is a request to the MLS board, not a setting.
+    trap: It only appears on one specific area of one specific template. In the 5-area "Real Estate Marketing" business there is no canvas and no market area, so there is no way to connect a feed at all — and the Campaign Studio that business opens on never mentions the MLS.
+- [NEEDS_SETUP] Keep the MLS feed refreshing itself twice a day instead of pressing Sync
+    route: /garvis/health | Sidebar > More > Automation & status > Health > Master switch > Arm
+    needs: The migration applied, WORKER_SECRET set, and someone pressing Arm on the Health page with the functions base URL and that secret.
+    trap: Nothing anywhere in the marketing screens tells you this clock exists or that it is off. Your listings just quietly stop being current, and the postcard "fill from your MLS" chips show stale homes.
+- [PARTIAL] Turn your photos into a 30-second reel — pick a cut and a shape, watch it play with motion and captions, then render a downloadable MP4
+    route: /garvis/webs/:worldId (Video sheet) | Sidebar > More > Build > Businesses > your business > tap the 🎬 Video bubble
+    needs: Photos uploaded to the business for the preview. SHOTSTACK_API_KEY for a downloadable file.
+    trap: The preview looks finished, so pressing Render MP4 feels like the last step — and it is the step that says the render provider isn't connected. Nothing warns you before you build the whole storyboard.
+- [NEEDS_SETUP] Generate logo and brand-look concepts and save a palette/avatar the other studios write and design in
+    route: /garvis/webs/:worldId (Branding board) | Sidebar > More > Build > Businesses > your business > tap the 🎨 Branding bubble
+    needs: An image key (OPENAI_API_KEY) for logo imagery; the palette and name work without it.
+    trap: Its own success message admits the limit — saving a logo sets your social avatar and palette but "Postcards don't print a logo yet" — so the postcards you print will not carry the mark you just made.
+- [NEEDS_SETUP] Real-estate posts built only from facts you verified: pick a community, press one orange button, get a draft with any unverified claim shown as a [VERIFY: …] hole, then send it to the Queue
+    route: /garvis/webs/:worldId (a 'Real Estate Marketing' business) | Sidebar > More > Build > Businesses > "Real Estate Marketing" > it opens on the Campaign Studio
+    needs: At least one community and at least one fact-with-a-source added by hand, in "Community setup". Facebook posting also needs an Ayrshare connection.
+    trap: On arrival there are no communities, so the one orange button just says "Add a community first" — and a fact will not save unless you supply the claim, the checked value, a source URL or quote, AND who verified it. That is four fields of homework before the button does anything, and no post can contain a fact you did not type.
+- [WORKING] See what needs attention in your real-estate marketing before you type anything — how many posts await your decision, what's scheduled next, how the last one did, unanswered inquiries
+    route: /garvis/webs/:worldId (Campaign Studio pulse line) | Sidebar > More > Build > Businesses > "Real Estate Marketing" > the strip above the orange button
+    needs: Nothing. It is honest and useful on arrival, even when empty.
+    trap: It reads almost the same information the Queue does, so the counts here and the badge on the Queue in the sidebar can look like two different to-do lists for the same work.
+- [PARTIAL] See who asked about your marketing, and find more people to reach
+    route: /garvis/webs/:worldId (Inquiries area) | Sidebar > More > Build > Businesses > your business > Advanced > "Inquiries" (real-estate template) or "Mailing Lists"
+    needs: A tagged link actually pasted into a published post (the Campaign Studio only tags a link that also appears in the post text), plus leads arriving.
+    trap: An area named "Inquiries" shows a generic lead list and a prospect finder — it does not show which post caused which inquiry, even though the database now records exactly that.
+- [PARTIAL] See the result of the marketing: posts sent, replies, appointments, signed listings
+    route: /garvis/webs/:worldId (Results area) | Sidebar > More > Build > Businesses > your business > Advanced > "Results"
+    needs: Nothing to open it. The half it promises — outcomes — has no screen at all.
+    trap: The template describes this area as "Posts, inquiries, appointments and signed listings — joined". Appointments and signed listings can never appear, because nothing can record them. An operator will read that description as a broken page rather than an unbuilt one.
+- [WORKING] Fill every studio in a new business with a starter piece at once
+    route: /garvis/webs/:worldId (the 'Fill all studios to start' button) | Sidebar > More > Build > Businesses > your business > the orange button in the top strip (only visible while the business is completely empty)
+    needs: Nothing — the deterministic path writes starter artifacts with no AI key.
+    trap: It disappears forever the moment any work exists, so if you press something else first you will never see it again and will not know it existed.
+- [WORKING] Open one studio on its own, without the surrounding business dashboard
+    route: /garvis/workshops | Sidebar > More > Build > Workshops > pick a card
+    needs: A business created first, otherwise the page is empty.
+    trap: It is a third door to tools you already reached two other ways, and it lists every area of every business — so one business with 16 areas produces 16 cards, which reads as sixteen more things to learn rather than shortcuts to the same six.
+- [WORKING] Reach the postcard/social/email/video studios from the Home screen or the Canvas instead of the business page
+    route: /garvis/command and /garvis/home/:businessId/:areaSlug | Sidebar > Home (right-hand panel when a studio is summoned), or Sidebar > More > Build > Canvas > a business > an area > the tool row
+    needs: A business with at least one area.
+    trap: The "Market data" tool in this dock is opened with no business attached (StudioDock.tsx:58 passes no worldId), so it shows every business's listings mixed together — different numbers than the same panel shows inside the business.
+  DEAD ENDS:
+   * /garvis/marketing — the original Marketing worker page is registered in src/App.tsx:119 but appears nowhere in src/lib/navConfig.ts. Only src/components/CommandPalette.tsx:90 links it, labelled "(legacy)". Two automated actions (src/lib/garvis/actionRegistry.ts:123, src/lib/garvis/workers.ts:172) still deposit finished campaigns there and tell you to go review them.
+   * composeCampaign() in src/lib/garvis/campaignCore.ts — 486 lines of verified, honest 'one listing becomes a postcard + social posts + an email' logic with zero callers in src/. The canvas's centre form that feeds it therefore changes nothing downstream.
+   * The re_outcomes table (supabase/migrations/app_0141_re_campaigns_outcomes.sql) — created, indexed, RLS'd, and never read or written by any .ts/.tsx file. The 'Results' area promises appointments and signed listings that nothing can record.
+   * The 🧢 Merch bubble on the canvas — only renders when the business has a 'merch' area, and none of the six templates in src/lib/garvis/workweb.ts creates one. It is reachable only by describing a merch business to the AI genesis box.
+   * 'Mailing Lists' and the master 'Mailing Lists' areas — named for the farm, but the farm panel refuses to render on them because src/pages/WorkWeb.tsx:923 requires archetype 'studio' and these are 'audience'. You get an upload button and nothing else.
+   * 'Email Newsletter' and 'Follow-Up' areas — named for email, but the email board only renders on a 'studio' area (src/pages/WorkWeb.tsx:952) and these are 'loop'. The working email board is an unlabelled bubble on the canvas instead.
+   * The parent 'Direct Mail' area — it is a 'launch' area, so clicking it gives a queue-an-email box, not the postcard designer. The designer is on its child called 'Creative'.
+   * 'Landing Pages' area — has a Generate button that writes a text outline as an artifact, but no landing-page studio panel exists for the 'landing' flavor, so nothing is built and the outline points you at a different product (the Preview Engine).
+   * DUPLICATE: two separate postcard makers — the canvas Postcards board (src/components/garvis/canvas/PostcardBoard.tsx) and the older single-card MailerDesigner (src/components/garvis/MailerDesigner.tsx). Different saved work, different buttons, both called 'Postcards'.
+   * DUPLICATE: two separate neighbourhood-list surfaces — 'People nearby' on the canvas (PeopleSheet inside MarketingCanvas.tsx) and the Farm panel behind Advanced (FarmPanel.tsx). Same territories table, but only the Farm one can print addressed cards.
+   * DUPLICATE: two separate market-stats screens — the read-only Analysis sheet on the canvas and MarketDataPanel behind Advanced (which is the only one that can connect the feed). The canvas one reads listings with no business filter; the Advanced one filters by business.
+   * DUPLICATE: two templates for the same job — 'Mom Real Estate Marketing' (16 areas, canvas-led) and 'Real Estate Marketing' (5 areas, Campaign-Studio-led). Same business, two completely different products, no guidance on the cards.
+   * DUPLICATE: three doors to the same studios — the business page canvas, /garvis/workshops, and the Canvas page's StudioDock. All render the identical components.
+   * DUPLICATE approval systems — marketing_assets.status (draft/approved/scheduled/published) on the legacy Marketing page is a second approval lifecycle that never touches the Queue, so 'approved' means two different things depending on which page you are on.
+   * /dev/marketing-canvas and /dev/board — dev-build-only preview routes (src/App.tsx), invisible in production.
+
+##### What runs on a clock without the operator
+This is the part of the product that is supposed to work while you are asleep: a database timer (pg_cron) that pokes 13 different background workers on a schedule — every 5 minutes, every 15 minutes, hourly, nightly, weekly, monthly. Those workers watch web pages, hunt for new businesses, draft follow-up emails and invoice chases, fire per-customer reminders, send appointment reminders, pull social numbers, and check the system is still alive. Almost none of them ever SEND anything: they put drafts in your Queue and wait for you to press approve. The whole thing is off until someone runs one database command ("arm the heartbeat") with a password that lives in the Supabase dashboard, not in this app — and until that happens every one of these features fails completely silently. There are three status pages that tell you whether it is on: Health (the master switch and the secrets list), Working for you (what the clock is doing right now), and Fleet (only the client problems that need judgment). The single most important line in the whole cluster is the small clock banner that says "Clock ticking — last tick N min ago" versus "The clock has never ticked"; if it says the latter, every promise on every other page in this cluster is not happening. Two live phone/web surfaces — online booking and missed-call text-back — run on outside webhooks rather than the clock, so they can work even when the clock is dead, but only after Twilio and a public booking link are configured.
+
+- [NEEDS_SETUP] Arm the heartbeat — the one switch that turns on everything that runs without you
+    route: /garvis/health (Master switch panel) | Sidebar > More > Automation & status > Health > "Master switch — the unattended layer" > "Arm the heartbeat"
+    needs: system-control deployed; migrations app_0087_system_control.sql + app_0128 applied; pg_cron/pg_net/vault enabled on the Supabase project; and the exact value of the WORKER_SECRET you set in Supabase → Edge Functions → Secrets, typed into the form.
+    trap: After you arm it the panel turns green and says ARMED — but it only checks that the 13 schedule rows EXIST, not that they work. If the secret you typed does not exactly match WORKER_SECRET, all 13 jobs get rejected forever and the panel still says ARMED. The only honest signal is the small clock line above it; if that says "never ticked" an hour later, the secret is wrong.
+- [WORKING] "Is the clock actually ticking?" — the one line that tells you whether any of this is real
+    route: no route (banner inside /garvis/health, /garvis/working, /garvis/automations, /garvis/money, and every Standing Orders panel) | Sidebar > More > Automation & status > Health — the banner sits directly under the page title
+    needs: Nothing to see it. It reports 'never ticked' until the heartbeat is armed with the right secret.
+    trap: On Automations and Money it is set to 'quiet' mode (src/pages/Automations.tsx line 174, src/pages/Money.tsx line 96), so a HEALTHY clock shows nothing at all — and a dead clock shows a warning. Silence on those pages means good, not broken. Also, if the database migration is missing the code falls back to 'never ticked', which reads like a broken clock rather than a missing table.
+- [WORKING] System health — what is installed, what is connected, what is missing
+    route: /garvis/health | Sidebar > More > Automation & status > Health
+    needs: The system-control function must be deployed, or the whole master-switch panel shows "system-control is not deployed" instead of your status.
+    trap: A wall of green ticks means the software EXISTS on the server — it does not mean anything is running. You can have every function "deployed", every secret set, and still have a completely dead clock. Read the clock line and the job list, not the green ticks.
+- [WORKING] Working for you — everything the clock is doing right now, in one read-only room
+    route: /garvis/working | Sidebar > More > Automation & status > Working for you
+    needs: Nothing — it shows useful state on arrival. What it reports is only truthful about 'running' if the clock is ticking.
+    trap: There are no buttons here on purpose. Every line says what is happening and links you to the page where you can actually change it, so if you come here to turn something on or off you will feel stuck. Pause/run-now live on the owning pages (Businesses, Automations, Contacts, Autopilot).
+- [PARTIAL] The Fleet — only the client problems that need your judgment today
+    route: /garvis/fleet | Sidebar > More > Automation & status > Fleet
+    needs: Paying clients on the books with package pins attached. With no clients it honestly says "Nothing needs you… No clients on the books yet."
+    trap: It can tell you "No August report exists for this client" and there is nowhere in the whole app to produce that report — the report generator (src/lib/garvis/clients/clientReportRun.ts) is never called by any screen. You will chase a nag you cannot clear.
+- [NEEDS_SETUP] Hourly pulse — the morning brief and the 4-hour "a reply is going cold" nudge
+    route: no route (job garvis-pulse-hourly) | Sidebar > More > Automation & status > Health > Master switch > click "garvis-pulse-hourly" for its card
+    needs: Heartbeat armed with the right WORKER_SECRET, AND a notification webhook URL saved on your profile (Sidebar > More > Account > Settings — a Discord or Slack incoming webhook).
+    trap: Without that webhook URL the function skips you entirely — it only looks at profiles that have one (line 52: profiles where webhook_url is not null). So it writes nothing, shows nothing in the app, and reports no error. It will look like the morning brief was never built.
+- [NEEDS_SETUP] Every-5-minute worker — runs the background thinking jobs you queued
+    route: no route (job garvis-worker-tick) | Sidebar > More > Automation & status > Health > Master switch > "garvis-worker-tick"
+    needs: Heartbeat armed; an AI provider key (ANTHROPIC_API_KEY or equivalent) set on the server; credit balance on the account.
+    trap: Its card on the Health page (src/lib/garvis/automationCards.ts, 'garvis-worker-tick') says it "executes work you already approved in the Queue — sends, publishes, deploys". That is not what happens: approvals are actually carried out in your browser the moment you click Approve (src/lib/garvis/execution.ts). Nothing on the clock picks up an approved item later, so if you approve something and close the tab mid-flight, it can sit approved-but-not-sent.
+- [NEEDS_SETUP] Every-15-minute worker — the real workhorse: page watches, hunts, reminders, appointment reminders, bulk-send drain, per-customer automations
+    route: no route (job garvis-standing-tick) | Sidebar > More > Automation & status > Health > Master switch > "garvis-standing-tick"
+    needs: Heartbeat armed. Individual jobs then need their own keys: GOOGLE_PLACES_API_KEY and APP_ORIGIN for client hunting, an email sender for anything that gets queued to send.
+    trap: If APP_ORIGIN is not set on the server, the nightly hunt still finds businesses and still builds demo sites — but never queues a single pitch, and nothing says why. The Health page's "Ready to hunt & send" panel is the only place that names this.
+- [NEEDS_SETUP] Per-customer automations — recall reminders, seasonal nudges, review requests on a client's own list
+    route: /garvis/automations | Sidebar > More > Automation & status > Automations
+    needs: A customer list imported (CSV paste), at least one automation switched on, and an email sender configured for anything to actually go out. Texting additionally needs Twilio plus the SMS switch in outreach settings.
+    trap: Nothing here ever sends — every due customer becomes a draft waiting in your Queue. If you never open the Queue, you will conclude the automations do not work. Also, a rule that fails five times in a row pauses ITSELF (the circuit breaker in app_0113) and only says so on the Fleet page.
+- [NEEDS_SETUP] Daily follow-up drafter — finds outreach that went quiet and writes the polite bump
+    route: no route (job garvis-followups-daily, 13:00 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-followups-daily"; the output appears in Sidebar > Queue
+    needs: Heartbeat armed; an AI key (it specifically wants OPENAI_API_KEY or LOVABLE_API_KEY for drafting); actual sent campaigns to follow up on.
+    trap: Brand new account = nothing to follow up = zero drafts, forever, with no message explaining that. It looks identical to 'broken'.
+- [NEEDS_SETUP] Overnight inbox reply drafter — answers waiting for you in the morning
+    route: no route (job garvis-inbox-draft-daily, 12:45 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-inbox-draft-daily"; drafts land in Sidebar > Queue
+    needs: Heartbeat armed; specifically OPENAI_API_KEY or LOVABLE_API_KEY (an Anthropic key alone does not satisfy it — see docs/RUNBOOK.md §3); inbound replies being received at all, which needs the Resend inbound wiring.
+    trap: With no AI key it silently produces nothing (the function reports 'available: false' to itself and stops). You get an empty Queue and no explanation on any screen.
+- [NEEDS_SETUP] Daily invoice chaser — drafts the polite/firm/final reminder ladder for unpaid invoices
+    route: no route (job garvis-invoice-chase-daily, 13:30 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-invoice-chase-daily"; results appear in Sidebar > Queue and Sidebar > More > Money > Money
+    needs: Heartbeat armed; invoices created and marked sent on the Money page; an email sender (RESEND_API_KEY).
+    trap: This is one of only four things that can send WITHOUT you clicking approve — but only if you explicitly granted it (Sidebar > Queue > Autonomy panel). Until then every chase sits in the Queue, so if you expected the machine to chase money on its own, it will look dead.
+- [NEEDS_SETUP] Monthly reactivation sweep — a check-in to contacts who went quiet 2–12 months ago
+    route: no route (job garvis-reactivate-monthly, 1st of the month) | Sidebar > More > Automation & status > Health > Master switch > "garvis-reactivate-monthly"
+    needs: Heartbeat armed; contacts with a real prior conversation on record.
+    trap: It only runs once a month, on the 1st. If you arm the clock on the 3rd you will see nothing for four weeks and reasonably assume it is broken.
+- [NEEDS_SETUP] Sunday scorecard — this week vs last week on the numbers that matter
+    route: no route (job garvis-scorecard-weekly, Sunday 22:00 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-scorecard-weekly"
+    needs: Heartbeat armed AND a notification webhook URL on your profile (Settings) — like the pulse, it only looks at profiles that have one.
+    trap: No webhook URL means it is delivered nowhere and recorded nowhere. There is no in-app page that shows the weekly scorecard.
+- [NEEDS_SETUP] Daily ad watchdog — flags spend drift, dead creatives and broken links on connected ad accounts
+    route: no route (job garvis-ads-watch-daily, 10:15 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-ads-watch-daily"
+    needs: Heartbeat armed; a connected Meta/Google ad account (Settings → Connections) with real spend.
+    trap: Quiet accounts stay quiet by design — no findings means no message ever. Absence of alerts is indistinguishable from the job not running.
+- [NEEDS_SETUP] Weekly memory consolidation — turns what happened into proposed lessons you approve
+    route: no route (job garvis-consolidate-weekly, Monday 08:00 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-consolidate-weekly"; proposals appear at Sidebar > More > Knowledge > Memory
+    needs: Heartbeat armed; an AI key; enough recorded activity to generalize from.
+    trap: On a new or quiet account it correctly produces nothing, every week. The Memory page will look permanently empty.
+- [NEEDS_SETUP] Social metrics sync — pulls post performance back in every 6 hours
+    route: no route (job garvis-social-sync); the numbers show on the Channels pages | Sidebar > More > Automation & status > Health > Master switch > "garvis-social-sync"; results at Sidebar > Channels
+    needs: Heartbeat armed; an Ayrshare key saved per-user in Settings → Connections (NOT a server secret); and Ayrshare's analytics are plan-gated — the free tier posts but returns no numbers.
+    trap: On a free Ayrshare plan it records "analytics unavailable" and shows counts only. You will see posts published but permanently blank engagement, which looks like a bug rather than a billing tier.
+- [NEEDS_SETUP] Nightly self-test (canary) — the system proves its own wiring still works
+    route: no route (job garvis-canary-nightly, 08:30 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-canary-nightly"
+    needs: Heartbeat armed; a webhook URL to receive the failure nudge (it also writes a note in the app's event feed).
+    trap: Silence is success here — the opposite of every other page. And the canary itself cannot report if the clock that runs it is dead, so it can never warn you about the one failure that matters most.
+- [NEEDS_SETUP] Property feed sync (MLS) — refreshes listings twice a day
+    route: no route (job garvis-mls-sync, 05:40 and 17:40 UTC) | Sidebar > More > Automation & status > Health > Master switch > "garvis-mls-sync". There is NO sidebar destination for the feed itself — it is a panel (src/components/garvis/MarketDataPanel.tsx) inside a business page.
+    needs: Heartbeat armed; a saved RESO feed URL + token, entered through the market-data panel, not through any sidebar page.
+    trap: The job is listed on the Health master switch as if it were a first-class feature, but there is no navigation path to the screen where you would connect a feed. If you never find that panel, this job runs forever and does nothing.
+- [NEEDS_SETUP] Online booking — a public page where customers pick a time, plus the day-before reminder
+    route: /garvis/booking (setup) and /book/:slug (the public page) | Sidebar > More > Automation & status > Online booking. The customer-facing page is URL-ONLY: yoursite/book/your-slug.
+    needs: Fill in business name, hours, timezone and at least one service in src/pages/BookingSetup.tsx, tick "Booking page is live", and Save. Confirmations need an email sender; text confirmations need Twilio.
+    trap: The page defaults to NOT live (enabled = false in the migration) — you must tick the checkbox and press Save, and there is no warning that your link is dead until you do. Also, the booking itself works even with a dead clock, but the day-before REMINDER does not, because that rides the 15-minute tick.
+- [NEEDS_SETUP] Missed-call text-back — anyone whose call you miss gets an automatic text within seconds
+    route: /garvis/missed-call | Sidebar > More > Automation & status > Missed-call text-back
+    needs: TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN set on the server; a Twilio phone number whose Voice webhook is pasted to point at the voice-inbound URL shown on the page; and a config row switched to enabled.
+    trap: This one runs on Twilio's clock, not the heartbeat, so it can work when everything else is dead — and it can silently do NOTHING if the Twilio webhook URL does not match exactly, because unsigned requests are rejected with no visible trace in the app. The config row is also the pre-authorization: this is the one automation that sends a real text with no approval step.
+- [PARTIAL] Overnight app builds (Autopilot)
+    route: /autopilot | Sidebar > More > Apps > Autopilot
+    needs: An AI key and credits. For true 'builds while the laptop is closed' you would have to add a separate database schedule by hand — it is not part of arming the heartbeat.
+    trap: It is described as unattended but it is really browser-driven: the self-chain caps at 25 hops, so a long build that stalls will just sit there until you reopen the page. And because that cron job would not be named garvis-*, it would never appear on the Health master switch even if you did schedule it.
+- [NEEDS_SETUP] Earned autonomy — letting four specific job types send without asking you first
+    route: /garvis/queue (Autonomy panel) | Sidebar > Queue > Autonomy panel
+    needs: Heartbeat armed, the relevant drafter working, and an explicit grant flipped to auto for that one class.
+    trap: This is the ONLY setting that makes the clock send email by itself. Until you grant it, every single clock-driven drafter in this cluster produces drafts and nothing else — which is exactly why the system feels like 'it doesn't work'. Cold pitches can never be granted autonomy, by design.
+- [NEEDS_SETUP] Arm the clock from GitHub instead of the app (Deploy Supabase action)
+    route: no route — outside the app entirely | URL-ONLY: github.com > your repo > Actions > "Deploy Supabase" > Run workflow > tick "arm heartbeat"
+    needs: Three GitHub repository secrets (Supabase access token, project ref, database password) plus whichever function keys you want synced.
+    trap: For a non-technical operator this is the only realistic way to get the clock on — yet nothing inside the app mentions it. The Health page's Arm button instead asks you to type a secret you have no way to look up from the app.
+  DEAD ENDS:
+   * Fleet nags for a monthly client report that cannot be produced anywhere: src/lib/garvis/clients/clientReportRun.ts (generateClientReport / approveReport / queueReportDelivery) is not called by a single screen in src/, yet src/lib/garvis/fleetView.ts raises 'report_due' and 'report_blocked' exceptions about it.
+   * Two competing 'is it set up?' pages: /garvis/setup (Setup console, src/pages/ClientReadiness.tsx) and /garvis/health (System health, src/pages/Health.tsx) both answer 'what still needs configuring', sit in different sidebar sections, and disagree in scope. A confused operator will bounce between them.
+   * The per-customer automation runner exists twice: the browser copy (src/lib/garvis/automation/triggersRun.ts, behind the 'Run due now' button) and the server copy inside supabase/functions/standing-worker/index.ts. Same logic, two code paths — pressing 'Run due now' and waiting for the 15-minute tick do the same thing, which is not obvious from the page.
+   * MLS feed sync is a first-class heartbeat job (garvis-mls-sync, listed on the Health master switch) with no sidebar destination at all — the only place to connect a feed is the panel src/components/garvis/MarketDataPanel.tsx buried inside a business page.
+   * The Autopilot build worker's schedule is a dead snippet: the only cron for supabase/functions/job-worker/index.ts is commented out in supabase/schema_v2_autopilot.sql under the name 'fableforge-job-tick', and the Health page's job reader (garvis_cron_status in supabase/migrations/app_0087_system_control.sql) only lists jobs named 'garvis-%', so even a correctly scheduled build tick would be invisible on the master switch.
+   * Documentation drift that will mislead: docs/RUNBOOK.md §4 still says the arm call 'schedules 9 pg_cron jobs' and prints 'armed: 11 jobs', while the live function (supabase/migrations/app_0128_mls_cron.sql) schedules 13 and the app checks for 13 (src/lib/garvis/systemControl.ts EXPECTED_JOBS).
+   * Misleading job card: the 'garvis-worker-tick' card in src/lib/garvis/automationCards.ts promises it 'executes work you already approved in the Queue — sends, publishes, deploys'. Approvals are actually executed in the browser at click time (src/lib/garvis/execution.ts); garvis-worker only runs queued agent_runs and never touches the approvals table.
+   * Two morning-report jobs (garvis-pulse-hourly and garvis-scorecard-weekly) deliver ONLY to an outside chat webhook and skip any owner without one — there is no in-app page that shows the morning brief or the weekly scorecard, so both look unbuilt until Settings → webhook URL is filled in.
+
+##### The AI layer — asking for things in plain language
+This is the part of the product where you type or say a sentence instead of hunting for a button. There are three doors into it and they are NOT the same thing. (1) The little bubble in the bottom-right corner of every page — "Say what you want to do" — which is mostly a very good, instant, free shortcut-finder that needs no AI at all. (2) "Home" in the sidebar, which is a full chat with Garvis that can answer, plan, open a studio beside the conversation, or go do work. (3) "Orchestrate" (hidden under More > Build), where you say a whole paragraph — "found the agency, research the market, write the plan, watch these grant pages" — and get back a numbered plan you approve before anything runs. Behind those sit two memory rooms (Memory = your uploaded documents on one tab, Garvis's own record of goals/beliefs/decisions on the other) and three older rooms — Missions, Mission Control, Brain, Mind — that are still live at their web addresses but were deliberately taken out of the sidebar. The single most important fact for this operator: almost everything that answers in words needs a server-side AI key set on the deployment, and there is currently NO visible indicator anywhere in a normal production build telling you whether that key is set. The honest-failure messages are mostly good ("The brain isn't answering — is an AI key set?"), but Orchestrate's failure toast leaks raw plumbing text, and the corner bubble tells you to "go ask Garvis on Home" — which, with no key, is also dead. Worse, there are TWO separate key settings that fix DIFFERENT halves of the product, and the one the operator can actually reach (Settings) only fixes about half.
+
+- [WORKING] Home — Garvis greets you and tells you what happened while you were away, and the 3 things worth doing next
+    route: /garvis/command | Sidebar > Home
+    needs: nothing
+    trap: On a brand-new empty account there is almost nothing to report, so the top of the page looks blank and the operator assumes the page is broken rather than empty.
+- [NEEDS_SETUP] Ask Garvis anything in plain words — the chat box on Home
+    route: /garvis/command | Sidebar > Home, then the box at the bottom: "Ask Garvis anything, or tell it what to do…"
+    needs: EITHER an ANTHROPIC_API_KEY set as a Supabase edge secret on the deployment, OR the operator pastes their own provider key in Settings. Also needs a credits balance above zero (supabase/functions/_shared/credits.ts checkCredits, 402 when empty; new accounts start at 100 credits per supabase/migrations/app_0017_credits.sql).
+    trap: Nothing on this page says the AI is unconfigured. src/components/garvis/GenerationReadiness.tsx line 31 returns null whenever the build is not in browser-direct mode — which is every normal production build — so the 'Templates only — connect an AI key' warning never renders. The operator types a sentence, waits, and gets "I hit a snag: The brain isn't answering…". It reads like a bug, not like a missing setting.
+- [NEEDS_SETUP] The three starter chips on an empty Home ("Design a business for me", "Build me an app…", "What can you do?")
+    route: /garvis/command | Sidebar > Home — the three grey pills above the message box (only visible before your first message)
+    needs: same AI key as the chat box
+    trap: These are the most inviting things on the first screen and they are the first thing a new operator clicks. With no key they fail identically to typing — so the very first click in the product produces an error.
+- [NEEDS_SETUP] "Build me an app that does X" — the chat writes the full build brief and drops you at the app forge with it pre-filled
+    route: /garvis/command → /new?idea=… | Sidebar > Home, then say "build me an app for tracking client appointments"
+    needs: AI key (as above). The actual app generation on /new then needs its own generation quota/credits.
+    trap: It navigates you away to a different page mid-sentence. If the operator did not expect to leave Home, it feels like the app jumped somewhere random.
+- [NEEDS_SETUP] "Open the postcard studio for Mom's Real Estate" — the studio opens BESIDE the conversation instead of replacing it
+    route: /garvis/command (split view); on a narrow screen it goes to /garvis/webs/:worldId instead | Sidebar > Home, then say "open the video studio for <business name>"
+    needs: AI key, AND at least one business already created, AND that business must already have a postcard or video area
+    trap: The split view only exists on screens wider than 1024px. On a laptop-narrow window or a tablet, saying the same sentence silently navigates to a different page instead — same words, completely different-looking outcome.
+- [NEEDS_SETUP] "Take me down the rabbit hole on X" — an exploration galaxy you can branch and wander
+    route: /garvis/explore | URL-ONLY (not in the sidebar). Reachable by saying it to Garvis on Home, or ⌘K > "Explore (rabbitholes)"
+    needs: AI key; PERPLEXITY_API_KEY for topic discovery (listed in .env.example under "Explorer topic discovery")
+    trap: There is no door to it in the sidebar at all. An operator who used it once has no way to find it again except by remembering the exact phrase or the ⌘K palette.
+- [NEEDS_SETUP] "Just do it" — Garvis runs its own tool loop right now and narrates each step in the conversation
+    route: /garvis/command | Sidebar > Home, then say something action-shaped ("draft a world for my brother's art business")
+    needs: An AI provider key as a SUPABASE EDGE SECRET. A key pasted in Settings does NOT fix this path — src/lib/garvis/brainModel.ts only uses the browser key when the build flag VITE_AI_DIRECT is true.
+    trap: This is the split that will convince the operator the product is broken: pasting a key in Settings makes the chat box start answering, but this — the part that actually DOES things — keeps failing, because it reads a different key in a different place.
+- [NEEDS_SETUP] Turning a request into a Mission — Garvis breaks the objective into worker tasks and runs them, showing a live checklist card in the chat
+    route: /garvis/command (the card) and /garvis/missions (the full list) | Sidebar > Home — happens automatically when your sentence reads as work rather than a question
+    needs: AI key; credits
+    trap: If the browser is refreshed mid-run, the database row still says 'running' but nothing is driving it. The card then shows a 'Resume' button (src/pages/Command.tsx MissionBlock) — but an operator who does not press it just sees a mission stuck at 'running' forever.
+- [WORKING] First-run shortcut: one click builds an entire real-estate marketing operation (campaigns, direct mail, social, video, landing pages, CRM)
+    route: /garvis/command → /garvis/webs/:worldId | Sidebar > Home — the card only appears when you have zero businesses
+    needs: nothing
+    trap: It is hard-wired to a real-estate business. An operator who is not in real estate sees a card that looks like the app assuming things about them, dismisses the one thing on the page that actually works with no setup, and is left with a chat box that errors.
+- [WORKING] The corner bubble — type a few words and it takes you to the right page and walks you through it
+    route: no route (floating panel on every page) | The round message icon at the bottom-right of every signed-in page — click it, type "moms postcard" or "approvals"
+    needs: nothing
+    trap: It is a small unlabelled bubble in the corner that can be closed and dragged. This is the single best answer to "I don't know how to navigate" in the whole product, and it is the least discoverable thing on the screen.
+- [WORKING] "Good morning" / "what did I miss" — a spoken state-of-the-business briefing from real rows
+    route: no route (corner bubble panel) | Corner bubble > type "good morning" or "status report"
+    needs: nothing (voice readback optionally uses the browser's speech synthesis)
+    trap: Nothing in the interface hints these phrases exist. The placeholder text in the box shows different examples, so the operator never discovers the one feature that summarizes their whole business in one line.
+- [WORKING] Number questions — "how many approvals are waiting", "how much did I make this month", "how many leads"
+    route: no route (corner bubble panel) | Corner bubble > type the question
+    needs: nothing
+    trap: It only recognises the exact listed phrasings. A near-miss ("what's my revenue") falls through to the AI tier and, with no key, produces "I don't have a shortcut for that" — making a working feature look absent.
+- [NEEDS_SETUP] The corner bubble's AI fallback — when your words don't match any shortcut, it asks a model where you meant to go, then falls back to the full Garvis brain
+    route: no route (corner bubble panel) | Corner bubble > type anything unusual
+    needs: AI provider key as an edge secret (the concierge function respects AI_PROVIDER, so OpenAI/OpenRouter/local also work here)
+    trap: If the edge functions were never deployed at all, both tiers throw and the dock says "I don't have a shortcut for that — Garvis on Home handles anything free-form" (ConciergeDock.tsx:485). It points the operator at Home, which in that state is equally dead. That one sentence will send them in a circle.
+- [PARTIAL] "do <anything>" in the corner — compiles a numbered plan in the bubble, shows the risks and gaps, and runs it on one press
+    route: no route (corner bubble panel) | Corner bubble > type "do draft an episode about rates" (the words do / run / execute are the trigger)
+    needs: For the six known shapes: nothing. For anything else: an AI key on the edge secrets (the compiler runs through the 'cluster-chat' edge function).
+    trap: Even when a plan compiles for free, pressing Run can still fail — most plan steps (research the market, write the business plan, generate a campaign) are themselves AI calls. So the operator sees a beautiful plan appear instantly, presses Run, and watches it fail step by step.
+- [WORKING] Paste a wall of thinking into the corner and it is captured intact, then offered to either the business designer or the plan compiler
+    route: no route (corner bubble panel) | Corner bubble > paste several paragraphs
+    needs: nothing to capture; the destination you choose then needs its own setup
+    trap: The capture is free and instant, so it feels like it worked — but both onward doors ("Design the business from it" and "Compile it as a plan") need the AI key to actually produce anything.
+- [PARTIAL] Orchestrate — say the whole thing in one paragraph, get back a numbered plan with what it can't do marked in amber, and nothing runs until you approve
+    route: /garvis/orchestrate | Sidebar > More > Build > Orchestrate
+    needs: An AI provider key as an edge secret for any sentence that isn't one of the six known plays. Each individual step then has its own requirement — research needs SERPER_API_KEY, emailing needs RESEND_API_KEY, social needs AYRSHARE_API_KEY, and outbound steps stop for approval in the Queue.
+    trap: This is the worst error message in the cluster. When the AI key is missing, the compile fails and src/pages/Orchestrate.tsx toasts the raw error text — the operator sees a red box saying "Edge Function returned a non-2xx status code". That is meaningless to a non-technical user and directly violates the project's own rule that failures surface as named, actionable messages. (The corner bubble, running the same code, says the honest thing instead.)
+- [PARTIAL] Arcs — every approved plan stays alive, parks itself when it's waiting on you, and picks back up on its own
+    route: /garvis/orchestrate (the "Arcs" list at the bottom) | Sidebar > More > Build > Orchestrate — scroll down
+    needs: For hands-off auto-resume: the unattended clock must be armed — WORKER_SECRET set and the heartbeat/cron running, because supabase/functions/standing-worker/index.ts is what re-checks blocked arcs and flips them to 'ready'.
+    trap: Without the clock armed, an arc that parked while waiting for something only wakes up if the operator happens to be sitting on the Orchestrate page. They will believe Garvis is working in the background when it is not.
+- [PARTIAL] Memory > Library — drop in a document or photo and Garvis reads it, summarizes it, and proposes where it belongs
+    route: /garvis/memory | Sidebar > More > Knowledge > Memory (opens on the Library tab)
+    needs: AI key for the summary/concepts; EMBEDDINGS_API_KEY for the "Garvis noticed…" connection-spotting and for semantic search
+    trap: With no key the upload SUCCEEDS but comes back with "Ingested. No summary available" — which is honest, but the whole reason to upload was the summary. The file sits in a list doing nothing and the feature looks pointless rather than unconfigured.
+- [PARTIAL] Ask Garvis — ask a question about your own business and get an answer with numbered sources from your own files and work
+    route: /garvis/memory (the search box at the top of the Library tab) | Sidebar > More > Knowledge > Memory > the "Ask Garvis about your business" box
+    needs: AI key for a written answer; EMBEDDINGS_API_KEY for meaning-based (rather than keyword) matching
+    trap: On a new account there is nothing on record, so every question returns "I don't have anything on record about that yet." The operator reasonably reads that as the search being broken rather than the shelf being empty.
+- [WORKING] Memory > The record — your goals, values and voice; Garvis's beliefs with evidence counts; a decision journal with a hit rate; and an append-only event log
+    route: /garvis/memory?tab=mind | Sidebar > More > Knowledge > Memory, then the "The record" toggle at the top right
+    needs: nothing
+    trap: The Goals box here is what steers every other AI surface (it is fed into the chat and the plan compiler via goalsDigest). Nothing tells the operator that. It reads like an optional diary, so it stays empty and everything else stays generic.
+- [NEEDS_SETUP] Missions page — hand Garvis an objective in a box, review the plan, press Run
+    route: /garvis/missions | URL-ONLY. Also ⌘K > "Missions (legacy)"
+    needs: AI key; credits
+    trap: An operator who finds this page (from an old link or the palette) has found a second, bare-bones front door to the same machine. It is labelled 'legacy' only inside the ⌘K palette, so from the page itself it looks like a first-class feature that the sidebar is hiding.
+- [WORKING] Mission Control — what Garvis did today, what it found, what it spent
+    route: /garvis/control | URL-ONLY. Also ⌘K > "Mission Control — activity (legacy)"
+    needs: nothing
+    trap: It is the only place that shows what the AI has actually cost you, and it is not in the sidebar. Its 'Top recommendation' and 'stale commitments' links also point at /garvis, another page that is not in the sidebar — so following a link here strands you somewhere with no way back except the browser Back button.
+- [PARTIAL] Brain (the old standalone document room)
+    route: /garvis/brain | URL-ONLY. ⌘K deliberately redirects "Brain" to /garvis/memory?tab=library instead
+    needs: same as Memory > Library
+    trap: It is byte-for-byte the same content as the Memory Library tab but with a different title ('Brain') and no tab bar. An operator who lands here from an old bookmark believes there are two different document stores.
+- [PARTIAL] Mind (the old standalone record room)
+    route: /garvis/mind | URL-ONLY. ⌘K deliberately redirects "Mind" to /garvis/memory?tab=mind instead
+    needs: nothing
+    trap: Same duplication problem as Brain: two web addresses, one thing, two different page titles ('The Mind' vs 'Memory').
+- [PARTIAL] AI for the apps YOU build (the managed gateway)
+    route: no route | URL-ONLY — there is no operator-facing surface at all
+    needs: ANTHROPIC_API_KEY (or the configured provider key) on the deployment; a deployed app backend; a non-zero credit balance
+    trap: The name suggests it is 'the AI switch' for the whole product. It is not — turning it on does nothing for Home, Orchestrate, Memory or the corner bubble, which read the same secret through completely different code paths.
+  DEAD ENDS:
+   * /garvis/brain — identical content to Memory's Library tab, with a different page title. Live route in src/App.tsx, absent from navConfig, and the ⌘K palette actively steers you away from it to /garvis/memory?tab=library.
+   * /garvis/mind — identical content to Memory's 'The record' tab. Same situation: live route, not in navConfig, palette redirects to /garvis/memory?tab=mind.
+   * /garvis/missions — a second, plainer front door to the exact engine the Home chat uses. Not in navConfig; marked 'legacy' only inside the ⌘K palette. Its own on-page text tells you to use the chat instead.
+   * /garvis/control (Mission Control) — the ONLY place in the product that shows what AI has cost you today/this week/all-time, and it has no sidebar entry. Reachable only by URL or by the ⌘K row labelled 'legacy'.
+   * /garvis (the old portfolio overview) — not in navConfig, but Mission Control links to it three separate times (top recommendation, stale commitments). Following those links drops the operator on an orphaned page.
+   * /garvis/explore (the rabbit-hole galaxy) — a real, substantial feature with no sidebar door. Only reachable by saying a specific phrase to Garvis, by ⌘K, or by the 'Full screen' button on the canvas beside the chat.
+   * TWO different AI key settings that fix different halves: the key the operator can actually paste (Sidebar > More > Account > Settings, stored in this browser) repairs the Home chat, mission planning and the corner bubble's deep brain — but NOT Orchestrate's compiler, NOT Ask Garvis, NOT document summaries, and NOT the 'go do it' tool loop, all of which read a server-side edge secret instead. Half the product coming back to life is arguably more confusing than none of it.
+   * agent-turn is the only AI path that is NOT provider-agnostic: supabase/functions/agent-turn/index.ts demands ANTHROPIC_API_KEY by name, while concierge, cluster-chat and garvis-brain all honour AI_PROVIDER (openai / openrouter / local). An operator who configures OpenAI gets a working Orchestrate and corner bubble but a permanently dead Home chat, with no message anywhere explaining why.
+   * No readiness indicator in production: src/components/garvis/GenerationReadiness.tsx returns null unless the build runs in browser-direct mode, so the 'connect an AI key' chip on Home never appears in a normal deployment. The only place that reports whether the key is set is the Health page (Sidebar > More > Automation & status > Health), and nothing in the AI surfaces points there except one error string.
+   * Orchestrate's failure message leaks raw plumbing — src/pages/Orchestrate.tsx toasts the raw error, so a missing key reads as 'Edge Function returned a non-2xx status code'. The identical failure in the corner bubble (ConciergeDock.tsx doIt) says 'The compiler isn't reachable — is an AI key set?'. The page the operator is told to use is the one with the worse message.
+   * The corner bubble's last-resort line sends the operator in a circle: 'I don't have a shortcut for that — Garvis on Home handles anything free-form.' When the edge functions or key are missing, Home cannot handle it either.
+
+##### Building apps (the original product)
+This half of the product is the original "describe an app and it writes it for you" factory, and it still works better than almost anything else in the repo — but it has been pushed to the back of the house. You log in and land on the agency Home (/garvis/command), not here; every door into app-building sits behind the sidebar's "More" chevron under a section called "Apps" (src/lib/navConfig.ts, src/components/layout/AppShell.tsx lines 150-215). What lives here: a list of your apps, a "describe it in a sentence" builder that first offers you three different visual directions, an importer that pulls in an app you already have from GitHub or a zip, a background build queue called Autopilot, and the workspace itself — a chat pane on the left, your code in the middle, a live running preview on the right. The chat is the real product: you type "add a settings page", it reads your files, writes them, and type-checks its own work. The workspace then piles fifteen more buttons on top of that — Brain, Map, Next, Check, Ideas, Theme, Database, Data, Secrets, Terminal, Autopilot, Cloud — and roughly a third of them cannot work on a deployed copy of this app at all, because they are still gated on a local-developer switch (VITE_AI_DIRECT) that is off in production. Those buttons do not hide or explain themselves; they throw a message like "Map generation currently requires direct mode (edge mirror coming)" (src/lib/aiClient.ts lines 157, 197, 231, 245, 265, 838). That is almost certainly a large part of "anytime I try to do anything I feel like it doesn't work" — the operator is clicking real-looking buttons that were never finished for the mode they are running in. It overlaps the agency half rather than conflicting with it: the agency side (worlds, Preview Engine, workshops) hands ideas INTO this builder via /new?idea= and /new?from=world, and every publish from here routes through the agency's Queue approval spine, so the two halves are wired together at the seams even though they read as two different products.
+
+- [WORKING] See all the apps you've built (and archive, duplicate or delete one)
+    route: /dashboard | Sidebar > More > Apps > Projects
+    needs: Nothing beyond being signed in and the app's own Supabase being configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).
+    trap: After you log in you are dropped on the agency Home, and this page is hidden behind the sidebar's 'More' chevron — so the operator can genuinely believe the app-builder no longer exists.
+- [PARTIAL] Build a new app by describing it in a sentence (with three visual directions to choose from)
+    route: /new | Sidebar > More > Apps > New app (also the 'Build an app' chip on Home when your account is brand new, and the ⌘K palette)
+    needs: ANTHROPIC_API_KEY set as a Supabase edge secret, the agent-turn function deployed, and credit balance. Free plan = 150 credits/month (supabase/migrations/app_0017_credits.sql), and one app build is estimated at 60 credits with every agentic turn checked at 12 — so roughly one or two builds a month before it stops with 'You're out of credits.'
+    trap: The build runs in this browser tab. Close it, refresh, or wander off to another page and the build dies half-finished. There is an auto-recover, but it only fires if you come back to that project's workspace and wait three minutes (src/pages/ProjectWorkspace.tsx lines 240-267).
+- [PARTIAL] The red 'key needed' warning on the build screen
+    route: /new (and the chat toolbar in every project) | Sidebar > More > Apps > New app — the small pill next to the 'Forge app' button
+    needs: Nothing. The app works fine with that warning showing.
+    trap: It looks like a blocking error. A non-technical operator will read 'key needed' in red, go hunting for an Anthropic API key, paste a personal key into the browser, and start paying twice — or give up and assume the builder is broken.
+- [WORKING] Bring in an app you already have (GitHub repo or a .zip)
+    route: /import | Sidebar > More > Apps > Import (also the 'Import' button on the Projects page)
+    needs: Nothing for a public repo. A private repo needs a GitHub token pasted into the form (used once, never stored).
+    trap: A bad URL or a rate-limited GitHub gives 'Network/CORS error reaching GitHub' — which reads like the product is broken rather than 'check the address'. And an imported app can only preview on the heavyweight 'Full build' runtime, which does not start on a deployed copy of this app (see the preview entry).
+- [NEEDS_SETUP] Autopilot — queue a written brief with a dollar cap and let it build in the background
+    route: /autopilot | Sidebar > More > Apps > Autopilot
+    needs: job-worker deployed, ANTHROPIC_API_KEY server-side, credits, and a database cron job armed to keep the queue draining. Its tables (jobs, job_milestones, agent_questions) come from schema_v2_autopilot.sql, which is a SEPARATE install step from the main schema.
+    trap: If the chain runs out, or credits run out, the job sits at 'Building' forever with no error and nothing nudging it. It looks like it is still working when nothing is.
+- [WORKING] The app workspace — chat on the left, code in the middle, your app running live on the right
+    route: /project/:id | URL-ONLY — no sidebar entry. You get here by clicking an app card on Projects, by 'Open project' on an Autopilot job, or by typing the app's name into ⌘K.
+    needs: Same as building: server AI key + credits.
+    trap: It is the busiest screen in the product — two tab groups, eleven icon buttons, an orange Autopilot button and a Cloud button, before you have done anything. Several of those icons open panels whose only button cannot work (below).
+- [WORKING] Change the app by chatting ('make the header sticky', 'add a login page')
+    route: /project/:id (chat pane) | Sidebar > More > Apps > Projects > click an app > Chat tab
+    needs: ANTHROPIC_API_KEY server-side + credits. Provider must be left on Anthropic.
+    trap: If the operator ever changes the provider in Settings or the model pill to OpenAI/Gemini/Grok, the good agentic editor silently switches off (src/lib/agent/loop.ts line 39) and edits fall back to a weaker path that uses the SERVER's key anyway — so their pasted key does nothing and the quality quietly drops.
+- [PARTIAL] Watch the app run while you edit it (Fast preview vs Full build)
+    route: /project/:id (right-hand pane) | Sidebar > More > Apps > Projects > click an app > the Runtime switch above the preview
+    needs: On a deployed copy: the host must serve Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: credentialless. Nothing in the repo does this.
+    trap: The failure message is written for a developer: 'The preview runtime needs cross-origin isolation… Fully restart the dev server (stop and re-run npm run dev), then hard-reload this page' (src/lib/webcontainer.ts line 330). An operator on a hosted copy can never satisfy that instruction. This also kills the Terminal and 'Publish to the web'.
+- [WORKING] Read and edit the actual code, with a file tree, tabs, version history and project-wide search
+    route: /project/:id (Code tab / magnifier icon) | Sidebar > More > Apps > Projects > click an app > Code
+    needs: Nothing.
+    trap: Not a trap so much as a mismatch: for a non-technical operator this whole half of the screen is noise they can't use, yet it occupies a top-level tab with equal billing to Chat.
+- [PARTIAL] Brain — write down what this app is for, so every future chat remembers
+    route: /project/:id (brain icon) | Sidebar > More > Apps > Projects > click an app > brain icon in the toolbar
+    needs: Typing works with nothing. Document upload needs the app rebuilt with VITE_AI_DIRECT=true and a browser API key — i.e. it is a developer-only feature.
+    trap: Uploading a document is the most natural thing to do here and it is the one thing that hard-fails with a message about 'direct mode' that means nothing to the operator.
+- [DEAD] Map — an auto-written summary of what the app currently contains
+    route: /project/:id (map icon) | Sidebar > More > Apps > Projects > click an app > map icon
+    needs: A rebuild of this whole app with VITE_AI_DIRECT=true plus a browser-side API key. Not achievable from the UI.
+    trap: The panel reads 'No map yet — click Generate to summarize the current app' and then the Generate button always errors. Pure dead end presented as a feature.
+- [DEAD] Next — a prioritised roadmap of what to build next
+    route: /project/:id (compass icon) | Sidebar > More > Apps > Projects > click an app > compass icon
+    needs: Same unreachable developer rebuild.
+    trap: Same shape as Map: an inviting empty state and a Generate button that can only produce an error.
+- [DEAD] Ideas — divergent directions this app could grow into
+    route: /project/:id (lightbulb icon) | Sidebar > More > Apps > Projects > click an app > lightbulb icon
+    needs: Same unreachable developer rebuild.
+    trap: Third identical dead end in the same toolbar — three of the eleven icons open panels that cannot do their one job.
+- [WORKING] Check — scan the app for broken imports and obvious breakage, then fix them
+    route: /project/:id (shield icon) | Sidebar > More > Apps > Projects > click an app > shield icon
+    needs: Nothing to scan. 'Fix these' needs the same AI setup as chat.
+    trap: It is named 'Check' and shown as an icon only — the operator has no idea this is the button that tells them whether their app is actually broken.
+- [DEAD] Autopilot inside the workspace — 'decide the next step, build it, check it, repeat'
+    route: /project/:id (the orange Autopilot button) | Sidebar > More > Apps > Projects > click an app > Autopilot (top right)
+    needs: Same unreachable developer rebuild. Note this is a DIFFERENT engine from the /autopilot page, which does work via a server function.
+    trap: This is the single orange primary button on the busiest screen in the product — the one the design rules reserve for 'the thing you do daily' — and clicking Start produces an error toast every single time.
+- [WORKING] Theme — change the app's colours, fonts and dark mode, or 'polish the design'
+    route: /project/:id (palette icon) | Sidebar > More > Apps > Projects > click an app > palette icon
+    needs: Presets need nothing. Convert/Polish need the server AI key + credits.
+    trap: 'Polish' spends a full edit's worth of credits and rewrites styling across the whole app — there is no preview and no cost warning before it runs.
+- [NEEDS_SETUP] Give this app a real database ('Set up database')
+    route: /project/:id (Database icon, and the Cloud dialog) | Sidebar > More > Apps > Projects > click an app > Database icon > 'Set up database'
+    needs: Either Settings > Connections > connect Supabase (which itself needs SB_OAUTH_CLIENT_ID and SB_OAUTH_CLIENT_SECRET set as edge secrets), or the two FF_PLATFORM_* secrets. Plus a plan limit: free accounts get 2 managed databases.
+    trap: The dialog promises in plain English 'Garvis Cloud creates and manages a database for this app automatically — no Supabase account needed', then fails with 'Connect Supabase (Settings → Connections), or enable FableForge Cloud by setting FF_PLATFORM_MANAGEMENT_TOKEN + FF_PLATFORM_ORG_ID.' The promise and the error contradict each other.
+- [DEAD] Work out what data the app needs and write the database schema for it
+    route: /project/:id (Database icon > 'Generate backend from this app') | Sidebar > More > Apps > Projects > click an app > Database icon > Generate backend
+    needs: Same unreachable developer rebuild.
+    trap: This is the step everything downstream depends on — 'Apply to Supabase', 'Deploy backend' and the Secrets panel all only appear once this has produced a migration file. Because it can never run, that entire chain is unreachable unless an app happened to be generated with a backend already.
+- [NEEDS_SETUP] Push the generated tables into your database ('Apply to Supabase', or copy the SQL yourself)
+    route: /project/:id (Database icon) | Sidebar > More > Apps > Projects > click an app > Database icon > 'Apply to Supabase' / 'Copy SQL & open editor'
+    needs: apply-migration deployed and a management token; or nothing at all if you use the copy-and-paste fallback.
+    trap: The helper text under the button is raw terminal instructions ('supabase functions deploy apply-migration', 'supabase secrets set SB_MANAGEMENT_TOKEN=…') shown directly to a non-technical operator. The one path that always works — Copy SQL — is the grey secondary button.
+- [NEEDS_SETUP] Browse and edit your app's live data, users, files, secrets and logs in-app
+    route: /project/:id (Table icon — 'Data') | Sidebar > More > Apps > Projects > click an app > Data icon
+    needs: 'Set up database' must have succeeded first, plus a Supabase management token.
+    trap: It opens on seven confident tabs (Data, Secrets, Auth, Storage, Functions, Logs, Backups) and every one of them says 'This app has no database yet — run "Set up database" first' — but the button that does that lives behind a different icon in a different dialog.
+- [NEEDS_SETUP] Add the API keys your app's integrations need, and push them live
+    route: /project/:id (key icon — only appears if the app needs keys) | Sidebar > More > Apps > Projects > click an app > key icon (appears automatically, and pops itself open once per app)
+    needs: A connected/provisioned database for the app, deploy-backend deployed, a Supabase management token, and generated edge functions — which come from the dead 'Generate backend' step.
+    trap: This dialog pops itself open uninvited the first time an app needs a key (src/pages/ProjectWorkspace.tsx lines 120-127), so the operator's first sight of a fresh app can be a modal demanding API keys they have never heard of.
+- [PARTIAL] Publish the app to a real web address
+    route: /project/:id (Cloud button > 'Publish to the web') | Sidebar > More > Apps > Projects > click an app > Cloud > Publish to the web
+    needs: Cross-origin isolation headers on the host; a successful npm build; and a Netlify token — either pasted into the Cloud dialog or set as the NETLIFY_AUTH_TOKEN edge secret.
+    trap: Three failures stacked behind one button. The first click doesn't publish at all — it flips you to 'Full build' and says try again. The second waits minutes for npm install. Then it can still end with 'Connect hosting first — paste a Netlify personal access token'. The operator will conclude Publish is broken long before reaching the real reason.
+- [NEEDS_SETUP] Push the app's code to a GitHub repository
+    route: /project/:id (Cloud button > 'Export to GitHub') | Sidebar > More > Apps > Projects > click an app > Cloud > Export to GitHub
+    needs: One of: GitHub connected in Settings > Connections (needs GITHUB_OAUTH_CLIENT_ID/SECRET set server-side), a personal access token pasted into the Cloud dialog, or GITHUB_TOKEN set as an edge secret.
+    trap: The token field is buried below the buttons, so the natural order is click Export first, get an error naming a shell command ('run supabase functions deploy github-export and set GITHUB_TOKEN'), and stop.
+- [STUB] 'Record a deployment' — the three Vercel / Netlify / Supabase buttons in the Cloud dialog
+    route: /project/:id (Cloud button, bottom) | Sidebar > More > Apps > Projects > click an app > Cloud > scroll to the three buttons
+    needs: Nothing — and it does nothing.
+    trap: They sit directly under the real Publish button, are labelled with the names of actual hosting companies, and add a green-ish row to the deployment list. An operator will click 'netlify' here, see a new entry appear, and believe their app is live.
+- [PARTIAL] Use your own photos in a generated app
+    route: /project/:id (chat pane > 'Use my own photos') | Sidebar > More > Apps > Projects > click an app > Chat > the assets link above the message box
+    needs: The project-assets storage bucket to exist (created by supabase/schema.sql). Harvesting needs fetch-url deployed.
+    trap: Uploaded photos only reach the app if a later chat message actually references them — uploading alone changes nothing visible, which reads as 'it didn't work'.
+- [NEEDS_SETUP] Ask the assistant to research something on the live web instead of editing code
+    route: /project/:id (globe toggle in the chat toolbar) | Sidebar > More > Apps > Projects > click an app > Chat > the research toggle next to the send box
+    needs: The research function deployed + ANTHROPIC_API_KEY server-side + credits (estimated at 20 credits a question — one eighth of a free month).
+    trap: Leaving the toggle on by accident means your next 'add a dashboard page' request comes back as an essay with citations and no code change, having spent credits.
+- [PARTIAL] Try the change before it is written (Plan first / Review edits / Revert)
+    route: /project/:id (two pills in the chat toolbar; Revert on any past change) | Sidebar > More > Apps > Projects > click an app > Chat > the 'Plan first' and 'Review edits' pills
+    needs: draft-plan deployed for Plan first. Review edits cannot work on a hosted copy.
+    trap: Both pills look identical and sit side by side, but only one of them does anything on a deployed app — and turning either on silently switches off the good agentic editor (src/lib/aiClient.ts line 454).
+- [PARTIAL] Work on a risky change in isolation (feature branches / separate chat threads)
+    route: /project/:id (thread switcher at the top of the chat) | Sidebar > More > Apps > Projects > click an app > Chat > thread menu > New branch
+    needs: Provider left on Anthropic + server key + credits.
+    trap: It is a genuinely advanced concept (git branches, renamed) offered to an operator who says they cannot navigate the product at all — and its error message tells them to go change a model setting.
+  DEAD ENDS:
+   * The generate-app edge function is retired but not removed. src/lib/aiClient.ts line 147 explains it was replaced ('Retired: every environment now gets the good pipeline'), no client code calls it — yet it is still deployed by `npm run functions:deploy` and is still the FIRST item the Health page checks under the heading 'Build' (src/lib/garvis/healthRun.ts line 26). A green tick there proves nothing and a red cross there means nothing.
+   * The Health page checks the wrong build functions. It probes generate-app, chat-edit and deploy-site, but NOT agent-turn (the one every build and edit actually depends on), provision-supabase, apply-migration, deploy-backend, github-export, db-console, project-logs, draft-plan or job-worker. Health can read all-green while every button in the workspace's Cloud and Database dialogs is dead.
+   * Two completely different things are both called 'Autopilot': the /autopilot page (real server-side job queue, works if the worker is deployed and kicked) and the orange Autopilot button inside the workspace (client-side loop that always errors with 'requires direct mode'). Same name, same icon family, opposite states.
+   * Six workspace features are gated on VITE_AI_DIRECT, a local-developer-only switch with no UI to turn it on: Map, Next/roadmap, Ideas, workspace Autopilot, Generate backend, and Brain document analysis (src/lib/aiClient.ts lines 157, 197, 231, 245, 265, 838). All six present inviting empty states and a Generate button that cannot succeed.
+   * 'Set up database' exists twice — the Database icon dialog and the Cloud dialog — as the same call with two different surrounding promises. Meanwhile the Data panel, which needs it done, tells you to run it without linking to either.
+   * The three 'record a deployment' buttons (vercel / netlify / supabase) duplicate the label of the real Publish button while doing nothing but writing a bookkeeping row.
+   * /project/:id is not in navConfig at all — the actual workspace, where all the work happens, has no door in the sidebar or command palette except via a project's name.
+   * The 'Answer questions' button on an Autopilot job links to /inbox, which is a redirect to /garvis/queue (src/App.tsx line 164). The destination is correct but the link is to a room that no longer exists under that name.
+   * Four different URLs seed the same builder: /new, /new?idea=…, /new?from=constellation and /new?from=world (src/lib/garvis/buildBridge.ts line 107, src/lib/garvis/actionRegistry.ts line 192, src/components/garvis/canvas/IdeaBoard.tsx line 135, src/pages/spike/GalaxyView.tsx line 439). The agency half hands work into the builder through all four, but none of them appear anywhere in navigation.
+   * Pressing 'Forge app' creates the project row in the database BEFORE the design directions appear (src/pages/NewProject.tsx line 195). Abandoning the picker leaves an empty 'draft' app in the Projects list with no files and no explanation.
+   * The cross-origin isolation headers that the Full-build runtime, the Terminal and Publish all depend on exist only in vite.config.ts (dev server). There is no public/_headers, netlify.toml or vercel.json in the repo, so those three features are structurally dead on any deployed copy of this app.
+   * The dev-only preview routes (/dev/marketing-canvas, /dev/profile-home, /dev/web, /dev/prospect-web, /dev/rebuild-preview, /dev/flagship-artist, /dev/win-hub, /dev/studios, /dev/board, /dev/workshops) are compiled out of production builds and are in nothing — dead in the operator's copy by design, but they are ten more screens a reader of the code will mistake for product.
+
+##### Configuration — what must be true before anything works
+This is the plumbing layer: the handful of screens where you tell the app who you are, hand it the keys to the outside services it uses (email, maps, video, e-signature, social, payments), and switch on the clock that makes it do things while you sleep. Almost nothing else in the product works until this cluster is satisfied, and almost none of it can be done from inside the app — roughly twenty secret keys have to be typed into the Supabase dashboard by someone comfortable with a command line, and a database script has to be pasted in before several of these screens even load. The app is unusually honest about this once you find the right page: /garvis/health lists which keys are set and which background jobs are scheduled, and /garvis/setup gives you a 5-item essentials checklist. But those two screens live behind the sidebar's "More" fold, nothing on the Home page points you at them, and they disagree with each other about what "ready" means. The single biggest trap is the clock: you can press "Arm the heartbeat" on Health, watch 13 of 13 jobs turn green, and still have a system where nothing ever runs — because the secret you typed has to exactly match a WORKER_SECRET you set separately in Supabase, and when it doesn't, the jobs fire and get rejected silently. The second biggest is that the Health page only checks 27 of the 73 functions that actually exist, so "all deployed" is not the same as "everything is there." Everything in this cluster is genuinely built and wired to real tables and real functions — the gap is that a non-technical operator cannot complete any of it alone.
+
+- [NEEDS_SETUP] Tell the app which database to talk to (the two startup values)
+    route: no route — set before the app is built | URL-ONLY — not a screen at all; it is two lines in a .env file copied from .env.example
+    needs: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY, baked in at build time
+    trap: If these are wrong, every page still renders and every button still clicks — you just get 'could not load' everywhere and no screen inside the app can fix it, because it is decided before the app starts.
+- [WORKING] Your account details, avatar, phone-notification webhook and calendar feed
+    route: /settings | Sidebar > More > Account > Settings (top 'Profile' card)
+    needs: nothing
+    trap: The 'Notification webhook' field only fires for Autopilot builds, and the calendar feed only shows up in the morning brief — neither does anything visible on the day you set it, so it feels like it didn't save.
+- [DEAD] Choose the AI brain and paste an AI key
+    route: no route — the 'Coding model' card inside /settings | Sidebar > More > Account > Settings (second card, 'Coding model')
+    needs: For it to matter at all: VITE_AI_DIRECT=true at build time. For the real product: ANTHROPIC_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY) plus AI_PROVIDER and AI_MODEL set as Supabase edge secrets — not here.
+    trap: This is the most prominent, most obvious-looking key field in the whole app, it says 'Ready — claude-sonnet-4-6 on Anthropic' with a green tick after you save, and it is almost certainly doing nothing. The key that actually matters cannot be typed anywhere in the app.
+- [NEEDS_SETUP] Turn on sending email as you (from-address, legal mailing address, daily cap, the master off switch)
+    route: no route — the 'Outreach' card inside /settings | Sidebar > More > Account > Settings (third card, 'Outreach — sending email')
+    needs: RESEND_API_KEY set in Supabase edge secrets, a domain verified inside Resend, plus a from-address and a real physical mailing address typed here, plus the toggle flipped on (it is off by default)
+    trap: You can fill in every field, flip the switch to ON, see 'Outreach is ON', and still have every email refuse to send — because the Resend key lives in the Supabase dashboard and this screen never checks whether it exists.
+- [NEEDS_SETUP] Auto-reply to brand-new leads within seconds, using your own wording
+    route: no route — the 'Instant first touch' block inside the Outreach card on /settings | Sidebar > More > Account > Settings > Outreach card > scroll to the orange 'Instant first touch' toggle
+    needs: Everything the Outreach card needs, first — the toggle is disabled until sending is on
+    trap: The toggle is greyed out until you save a from-address and mailing address AND flip the main sending switch, with no message saying why it is greyed out.
+- [WORKING] Give each business its own from-name and from-address
+    route: no route — a collapsed disclosure at the bottom of the Outreach card on /settings | Sidebar > More > Account > Settings > Outreach card > bottom disclosure (per-business sender identity)
+    needs: At least one business created first, plus the global Outreach card filled in
+    trap: It is closed by default and looks like a footnote, so if you run more than one business every email goes out under the single global identity and you never notice.
+- [NEEDS_SETUP] A forwarding address so email you forward lands in your Queue
+    route: no route — the 'Forward-in mailbox' card inside /settings | Sidebar > More > Account > Settings (fourth card)
+    needs: A domain added as an inbound domain in Resend with its MX record, a webhook pointed at the resend-inbound function, and INBOUND_SECRET set as an edge secret
+    trap: The screen shows you an address that literally reads 'yourname@<your-inbound-domain>' — it is a template, not a working address, and forwarding mail to it does nothing until three separate DNS/webhook steps are done outside the app.
+- [PARTIAL] Connect outside accounts: Supabase, GitHub, Netlify, DocuSign, Ayrshare (social)
+    route: no route — the 'Connections' card inside /settings | Sidebar > More > Account > Settings (fifth card, 'Connections')
+    needs: Netlify/Ayrshare: just a token from that provider. Supabase/GitHub/DocuSign: you must first register an OAuth app with that provider and set two edge secrets each — six secrets that are in NO checklist anywhere in this app and are not in .env.example.
+    trap: The three 'Connect' buttons look like the easy path and are the hardest — clicking one throws a toast about setting edge secrets that are listed on no page, while the Health page's secret list never mentions them, so they show as neither missing nor set.
+- [WORKING] Point each business at its own social accounts
+    route: no route — appears under the Ayrshare row in Connections once Ayrshare is connected | Sidebar > More > Account > Settings > Connections > connect Ayrshare > per-business destinations disclosure
+    needs: An Ayrshare API key connected, and a Profile-Key per business from the Ayrshare dashboard
+    trap: Once you map even ONE business, every unmapped business stops posting entirely instead of falling back — so a half-finished mapping silently kills the rest.
+- [DEAD] See what the AI has cost you (estimated)
+    route: no route — the 'AI spend (estimated)' card inside /settings | Sidebar > More > Account > Settings (second-to-last card)
+    needs: VITE_AI_DIRECT=true at build time — otherwise it is structurally always zero
+    trap: It will read '~$0.00 — No usage recorded yet' forever while the system is spending real money through the server, and it sits directly above the Spending guard card that shows the real number, so the two contradict each other on the same screen.
+- [WORKING] Cap what the AI is allowed to spend per day and per month, with a panic switch
+    route: no route — the 'Spending guard' card at the bottom of /settings | Sidebar > More > Account > Settings (last card)
+    needs: Migration app_0127 applied — otherwise the card shows 'Guard not reachable yet'
+    trap: When you hit the cap, features all over the app just start refusing with a spending message that has nothing to do with the button you pressed — and the reset is on a UTC clock, not your local midnight.
+- [PARTIAL] Setup console — the 5-item 'am I ready to operate?' checklist
+    route: /garvis/setup | Sidebar > More > Automation & status > Setup
+    needs: Nothing to view it. To clear it: the clock armed, one business created, a brand kit with a compliance line, contacts imported, and the email settings filled in
+    trap: It is called 'Setup' in the sidebar but it does no setup — every item just links you somewhere else, mostly back to Settings. And two of its five 'essentials' (a legal compliance line, an MLS feed) are meaningless unless you happen to be a real-estate agent, so a non-agent can never reach 'Ready to operate'.
+- [PARTIAL] System health — what is actually installed and switched on
+    route: /garvis/health | Sidebar > More > Automation & status > Health
+    needs: The database script applied and the two deploy commands run (docs/RUNBOOK.md §1-2)
+    trap: Every row can read 'deployed' and every table 'present' while 46 other functions are missing entirely — so a green Health page is not proof the app works, and the operator will reasonably conclude the broken feature is a bug rather than a missing install.
+- [NEEDS_SETUP] Master switch — which secret keys are set, which background jobs are scheduled, and the 'Arm' button
+    route: no route — the orange panel near the top of /garvis/health | Sidebar > More > Automation & status > Health > 'Master switch — the unattended layer' panel
+    needs: The system-control function deployed, migrations app_0087 and app_0128 applied, the pg_cron and vault database extensions enabled, and a WORKER_SECRET already set in Supabase edge secrets that you then re-type into the Arm box
+    trap: Arming succeeds and shows 'ARMED — 13 of 13 jobs' even when the secret you typed does not match the WORKER_SECRET on the server. Every job then fires on schedule and is rejected with a 401 forever (supabase/functions/garvis-pulse/index.ts line 46), and the only symptom is the clock line a few inches above saying it has never ticked.
+- [WORKING] The clock — is the background work actually running right now
+    route: no route — a banner at the top of /garvis/health, and repeated on Working / Money / Automations | Sidebar > More > Automation & status > Health (top banner), or Sidebar > More > Automation & status > Working for you
+    needs: WORKER_SECRET matching, the jobs scheduled, and the webhook-group functions deployed with JWT checking off (the functions:deploy:webhooks command in package.json)
+    trap: Its fix-it text tells you to 'run garvis_arm_heartbeat(<functions-url>, <secret>) in the SQL editor' — raw database instructions handed to a non-technical operator, even though there is a working Arm button on the very same page.
+- [WORKING] Ready to hunt & send — the exact prerequisites for finding prospects and emailing them
+    route: no route — a panel on /garvis/health | Sidebar > More > Automation & status > Health > 'Ready to hunt & send' panel
+    needs: GOOGLE_PLACES_API_KEY, APP_ORIGIN, RESEND_API_KEY as edge secrets, plus from-address, mailing address and the sending switch
+    trap: If its own probe fails it renders nothing at all (src/components/garvis/HuntReadiness.tsx: 'if (err) return null'), so on a half-installed system the one panel that would explain why prospecting produces nothing simply vanishes from the page. Related: APP_ORIGIN is the silent killer — unset, hunts run and build demo sites but never queue a single pitch — and it is not listed anywhere in .env.example.
+- [WORKING] Live-test the Google Maps key with a real lookup
+    route: no route — the 'Test Places key' button inside the hunt-readiness panel on /garvis/health | Sidebar > More > Automation & status > Health > 'Ready to hunt & send' > Test Places key
+    needs: system-control deployed and GOOGLE_PLACES_API_KEY set
+    trap: This is the only live key test in the entire app — nothing equivalent exists for the AI key, the email key, the video key or any other. Every other key shows as 'set' the moment it exists, even if it is expired or typed wrong.
+- [NEEDS_SETUP] Verify a sending domain so your email lands in inboxes instead of spam
+    route: /garvis/email-domains | Sidebar > More > Automation & status > Sending domains
+    needs: RESEND_API_KEY as an edge secret, the sender-domain function deployed, and access to the domain's DNS at the registrar
+    trap: Verifying a domain here does NOT change what you send from — you then have to go to Settings and type the matching address into the Outreach card by hand, and nothing on this page says so.
+- [NEEDS_SETUP] Your plan, credit balance and buying more
+    route: /billing | Sidebar > More > Account > Subscription
+    needs: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, the two price IDs, VITE_STRIPE_PUBLISHABLE_KEY, and the billing functions deployed
+    trap: A brand-new account starts with 150 credits — about $1.50 of AI work, roughly two app builds. When they run out every AI feature across the whole product starts refusing at once, and the only way to add more is a Stripe setup that most installs will not have done.
+- [PARTIAL] Connect a live property-listings feed (MLS)
+    route: no route — a panel inside a single business page, /garvis/webs/:worldId | Sidebar > More > Build > Businesses > open a business > Market data panel
+    needs: An MLS or vendor (Trestle, Bridge, Spark, MLS Grid) RESO Web API URL and token, the mls-sync function deployed, and the clock armed for automatic refresh
+    trap: The Setup console lists 'MLS market feed' as a step and its button goes to /garvis/webs — the businesses LIST, not the panel — so the operator lands on a page with no MLS anything on it and has no way to guess they must open a business first.
+- [WORKING] The page you land on after approving an outside account
+    route: /oauth/callback | URL-ONLY — you are sent here automatically by Supabase/GitHub/DocuSign; you never navigate to it
+    needs: The oauth function deployed and the matching provider client id/secret set as edge secrets
+    trap: If you open it directly, or come back to it more than 15 minutes later, it errors — and the error looks like the connection is broken rather than simply stale.
+  DEAD ENDS:
+   * The AI key field in Settings ('Coding model') is a dead end in any normal deployment — it saves to your browser only and the real key must be set in the Supabase dashboard. The card even admits this in small grey text at the bottom, after showing a green 'Ready' tick.
+   * The 'AI spend (estimated)' card in Settings is structurally always $0 in a real deployment, and it sits immediately above the Spending guard card which shows the true figure. Two spend readouts on one screen, one of them permanently wrong.
+   * Six heartbeat/clock readouts for one fact: the Setup console's 'clock is running' step, the Health page banner, the Health page Master Switch badge, Working for you, Money, Automations, and the Standing Orders panel. The Master Switch can read ARMED while the banner three inches above reads 'never ticked' — and the operator has no way to know the banner is the one telling the truth.
+   * Two competing setup checklists that overlap and disagree: /garvis/setup (5 'essentials', real-estate wording) and the 'Ready to hunt & send' panel on /garvis/health (7 prerequisites, prospecting wording). Both check the from-address, the mailing address and the sending switch; neither mentions the other.
+   * 'Setup' in the sidebar does no setup. The real configuration lives at /settings, which is called 'Settings' in a different sidebar section. Two near-identical names, one of them a checklist that only links elsewhere.
+   * The Connections panel has no route of its own — it can only be reached by scrolling to the fifth card of Settings. Meanwhile DocuSign can also be connected from inside the Paperwork studio and Ayrshare from inside the Social publisher, so the same connection has three doors and none of them is obvious.
+   * Six OAuth edge secrets (SB_, GITHUB_ and DOCUSIGN_ client id + secret) gate the three one-click Connect buttons, and they appear on no checklist in the app: the Health page's Master Switch lists 21 secrets and none of these six, so they show as neither missing nor set.
+   * The Health page checks 27 of 73 functions. Not probed, among others: connections, oauth, system-control, sender-domain, social-publish, booking, generate-image, generate-video, send-sms, mls-sync, research, fact-script, concierge, speak. 'All deployed' is not a guarantee.
+   * The Master Switch lists ANTHROPIC_API_KEY as the AI secret but never lists AI_PROVIDER, AI_MODEL, OPENAI_API_KEY or OPENROUTER_API_KEY. An operator who correctly configured OpenAI will stare at a permanent red X next to ANTHROPIC_API_KEY and think their AI is broken.
+   * .env.example is out of step with the app and will mislead anyone following it. It still lists AYRSHARE_API_KEY as a server secret, which no code reads (social posting uses the per-account key from Connections). It omits APP_ORIGIN entirely — the one unset value that makes prospecting silently produce nothing — plus TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER (texting), GEMINI_API_KEY (AI video), ELEVENLABS_API_KEY, the six OAuth client id/secret pairs, and the two Stripe price IDs.
+   * When the AI key is missing, most features fail with raw provider text. supabase/functions/_shared/ai.ts sends an empty key and surfaces the provider's own reply verbatim ('anthropic 401: {...}'). Only agent-turn and discover-run pre-check and say 'ANTHROPIC_API_KEY is not set' in plain words — so the majority of AI features fail with plumbing an operator cannot read.
+   * Nothing on the Home page (/garvis/command) points at Setup or Health. A brand-new operator with zero of five essentials done sees a chat box, three suggestion chips, and a 'Set up Mom's Real Estate marketing' card — with no indication that email, the clock, and the AI brain are all unconfigured.
+   * The Forward-in mailbox shows a placeholder address ('alias@<your-inbound-domain>') that looks like a real address you can copy. Copying and forwarding to it does nothing until an MX record, a Resend inbound domain and a webhook secret are configured outside the app.
+

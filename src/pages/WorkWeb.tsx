@@ -57,6 +57,7 @@ const SocialBoard = lazy(() => import('../components/garvis/canvas/SocialBoard')
 const IdeaStudio = lazy(() => import('../components/garvis/IdeaStudio').then((m) => ({ default: m.IdeaStudio })));
 const ReelStudio = lazy(() => import('../components/garvis/ReelStudio').then((m) => ({ default: m.ReelStudio })));
 const FactChannelStudio = lazy(() => import('../components/garvis/FactChannelStudio').then((m) => ({ default: m.FactChannelStudio })));
+const CampaignStudio = lazy(() => import('../components/garvis/re/CampaignStudio').then((m) => ({ default: m.CampaignStudio })));
 const UgcStudio = lazy(() => import('../components/garvis/UgcStudio').then((m) => ({ default: m.UgcStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
@@ -139,7 +140,7 @@ export default function WorkWeb() {
           if (requestedArea && w.clusters.some((c) => c.slug === requestedArea && c.charter)) return requestedArea;
           // Single-purpose worlds (answering desk / document studio / data workspace) should OPEN on
           // their studio — the working surface — not on the vault/intel the model emitted first.
-          const STUDIO_FIRST = ['assist', 'deliver', 'data', 'tracker', 'lead_engine', 'content_growth'];
+          const STUDIO_FIRST = ['assist', 'deliver', 'data', 'tracker', 'lead_engine', 'content_growth', 'listing_campaign'];
           const studio = w.clusters.find((c) => c.charter && STUDIO_FIRST.includes(c.charter.flavor));
           return studio?.slug ?? w.clusters.find((c) => c.charter)?.slug ?? null;
         });
@@ -219,7 +220,14 @@ export default function WorkWeb() {
   const leadDesk = useMemo(() => !!web
     && web.clusters.some((c) => c.charter?.flavor === 'lead_engine')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
-  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk || growthDesk || leadDesk;
+  // A real-estate campaign world's front page IS its campaign studio. Unlike growthDesk/leadDesk
+  // this carries NO launch/audience exclusion, and deliberately: its Inquiries area is the outreach
+  // half, and the studio is where that outreach is decided. Putting the marketing canvas in front of
+  // it would bury the one surface the workspace exists for — the exact "so many places to go" trap
+  // the doctrine names (docs/real-estate-marketing-implementation.md §3.5).
+  const campaignDesk = useMemo(() => !!web
+    && web.clusters.some((c) => c.charter?.flavor === 'listing_campaign'), [web]);
+  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk || growthDesk || leadDesk || campaignDesk;
 
   const doRunPlay = async () => {
     if (!templatePlay) return;
@@ -975,6 +983,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
 
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
         <PanelBoundary name="reel studio"><ReelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+      )}
+
+      {/* THE REAL-ESTATE CAMPAIGN STUDIO — verified community facts become a draft, the draft becomes
+          an approval bound to an immutable version, and only that version publishes. The pulse line
+          answers "who needs attention, what is scheduled, what is working" before anything is typed. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'listing_campaign' && (
+        <PanelBoundary name="campaign studio"><CampaignStudio worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded

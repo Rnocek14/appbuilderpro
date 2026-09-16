@@ -38,7 +38,8 @@ Deno.serve(async (req) => {
   try {
     const body = (await req.json().catch(() => ({}))) as {
       token?: string; kind?: string; path?: string; source?: string;
-      lead?: { name?: string; email?: string; phone?: string; message?: string };
+      // heard_from is what the prospect SAID influenced them — the only strong attribution evidence.
+      lead?: { name?: string; email?: string; phone?: string; message?: string; heard_from?: string };
     };
     const token = cap(body.token, 64);
     const kind = (body.kind ?? '').trim();
@@ -83,18 +84,26 @@ Deno.serve(async (req) => {
     // the one send path). Shared with claim-submit so every intake endpoint has the same rail.
     if (kind === 'lead') {
       const email = (cap(body.lead?.email, 200) ?? '').toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
-        return json({ ok: true, lead: false, reason: 'invalid_email' });
-      }
       const name = cap(body.lead?.name, 200);
       const phone = cap(body.lead?.phone, 60);
       const message = cap(body.lead?.message, 2000);
+      // A phone number is a way to answer someone (app_0141). What we still refuse is an inquiry
+      // with neither — there would be no way to reply to it at all.
+      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+      if (!emailOk && !(phone ?? '').trim()) {
+        return json({ ok: true, lead: false, reason: 'no_way_to_reply' });
+      }
 
+      const who = name || (emailOk ? email : phone) || 'someone';
       const { leadId, touched } = await captureLead(admin, {
         ownerId, worldId, channelId: channel.id, previewSiteId: null,
         name, email, phone, message,
         source: source === 'postcard' ? 'postcard-qr' : (source ?? 'website'),
-        mindSubject: `Lead from the website: ${name || email}${source ? ` (via ${source})` : ''}`,
+        // The raw ?src= rides through: a tag we minted resolves to the post that caused this
+        // inquiry; anything else is kept as the source and attributed to nobody.
+        srcTag: source ?? null,
+        statedInfluence: cap(body.lead?.heard_from, 500),
+        mindSubject: `Lead from the website: ${who}${source ? ` (via ${source})` : ''}`,
       });
       if (!leadId) return json({ error: 'Could not record the lead.' }, 500);
 
@@ -104,8 +113,8 @@ Deno.serve(async (req) => {
         const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).single();
         await notifyText(
           (owner as { webhook_url?: string } | null)?.webhook_url,
-          `🌱 NEW LEAD — ${name || email}${source ? ` (via ${source})` : ''}\n` +
-          `${email}${phone ? ` · ${phone}` : ''}\n` +
+          `🌱 NEW LEAD — ${who}${source ? ` (via ${source})` : ''}\n` +
+          `${emailOk ? email : ''}${emailOk && phone ? ' · ' : ''}${phone ?? ''}\n` +
           (message ? `"${message.slice(0, 300)}"\n` : '') +
           (touched ? '⚡ Answered instantly with your first-touch template — the thread is warm for your personal follow-up.' : ''),
         );

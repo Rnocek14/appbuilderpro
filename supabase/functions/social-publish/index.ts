@@ -17,8 +17,11 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection } from '../_shared/connections.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
-import { checkDraft, providerPayload, mapProviderResult, type SocialDraft } from '../_shared/socialCore.ts';
+import { checkDraft, providerPayload, mapProviderResult, platformUrls, type SocialDraft } from '../_shared/socialCore.ts';
 import { disclosureGate, parseProvenance } from '../_shared/mediaProvenanceCore.ts';
+import { bytesDigest, parseVersionContent, readBoundPayload, versionHash } from '../_shared/postVersionCore.ts';
+import { factGate, parseFact } from '../_shared/reFactsCore.ts';
+import { complianceGate } from '../_shared/publishGate.ts';
 
 const AYRSHARE_URL = 'https://app.ayrshare.com/api/post';
 
@@ -38,10 +41,12 @@ Deno.serve(async (req) => {
     //  1) the OWNER (browser) — Authorization JWT; the approval must be theirs.
     //  2) the STANDING WORKER (x-worker-secret) — serving BOTH drains: the content-week drain
     //     (garvis-auto staged weeks) and the social drain (operator-queued posts). The owner is
-    //     derived FROM the approval row, never from the caller. No requested_by restriction: a
-    //     publish_post approval only ever reaches 'approved' through the owner's decision in the
-    //     Queue — status='approved' IS the human authority for either class, and restricting to
-    //     garvis-auto would strand approved operator-queued posts. Everything downstream —
+    //     derived FROM the approval row, never from the caller. No requested_by restriction for the
+    //     legacy path: a publish_post approval reaches 'approved' through the owner's decision in
+    //     the Queue, so status='approved' IS the human authority for either class, and restricting
+    //     it would strand approved operator-queued posts. (BOUND posts — app_0140 — are stricter:
+    //     the content-week drain mints pre-approved 'garvis-auto' approvals, and those are refused
+    //     below, because nothing may publish to a real account on a decision no person made.) Everything downstream —
     //     payload-hash check, atomic double-post claim, checkDraft, per-brand Profile-Key — is
     //     identical either way.
     const workerSecret = Deno.env.get('WORKER_SECRET');
@@ -49,7 +54,7 @@ Deno.serve(async (req) => {
 
     // The approval is the authority to post. Verify it: correct kind, approved, and untampered.
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', approval_id).single();
+      .select('id, owner_id, kind, status, payload, payload_hash, result, requested_by').eq('id', approval_id).single();
     if (!approval) return json({ error: 'Approval not found' }, 404);
     if (approval.kind !== 'publish_post') return json({ error: 'Approval is not a publish_post.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
@@ -71,11 +76,13 @@ Deno.serve(async (req) => {
       uid = user.id;
     }
 
-    const rowId = (approval.payload as { post_row_id?: string })?.post_row_id;
+    const bound = readBoundPayload(approval.payload);
+    const rowId = bound.postRowId;
     if (!rowId) return json({ error: 'Approval payload is missing post_row_id.' }, 400);
 
     const { data: row } = await admin.from('social_posts')
-      .select('id, owner_id, world_id, body, platforms, media_urls, scheduled_for, status, provider_post_id, ai_provenance').eq('id', rowId).single();
+      .select('id, owner_id, world_id, campaign_id, body, platforms, media_urls, scheduled_for, status, provider_post_id, ai_provenance, current_version_id')
+      .eq('id', rowId).single();
     if (!row || row.owner_id !== uid) return json({ error: 'Post not found' }, 404);
     if (row.provider_post_id || !['queued'].includes(row.status)) return json({ error: `Post already ${row.status}.` }, 409);
 
@@ -108,6 +115,41 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: reason }, 422);
     };
 
+    // ----- THE BINDING (app_0140) -----
+    // What publishes is the IMMUTABLE VERSION the human approved, not the live row. The version row
+    // cannot be edited (RLS grants select+insert only, and a trigger refuses update/delete even for
+    // the service role), and its hash is re-derived here and compared against the one bound into the
+    // approval — so an edit after approval cannot reach an account; it needs a new decision.
+    //
+    // This rail refuses two things outright that the general path tolerates:
+    //   * a version-less payload for a post that HAS a version — the binding is never optional;
+    //   * an approval no human decided (requested_by 'garvis-auto'), because the content-week drain
+    //     mints pre-approved publish_post rows and those must never reach a real estate account.
+    // A legacy post with no version at all still publishes exactly as it did before.
+    let versionContent: ReturnType<typeof parseVersionContent> | null = null;
+    const hasVersion = !!(bound.versionId || (row as { current_version_id?: string }).current_version_id);
+    if (hasVersion) {
+      if (String(approval.requested_by ?? '') === 'garvis-auto') {
+        return await block('This post was approved by automation, not by a person — it will not publish.');
+      }
+      if (!bound.versionId || !bound.contentHash) {
+        return await block('This post has an approved version but the approval is not bound to it — re-approve it.');
+      }
+      const { data: ver } = await admin.from('post_versions')
+        .select('id, post_id, owner_id, body, platforms, media_urls, media_digests, ai_provenance, scheduled_for, scheduled_local, schedule_tz, fact_ids, compliance_line, content_hash')
+        .eq('id', bound.versionId).single();
+      if (!ver || ver.owner_id !== uid || ver.post_id !== rowId) {
+        return await block('The approved version for this post could not be found.');
+      }
+      versionContent = parseVersionContent(ver);
+      const recomputed = await versionHash(versionContent);
+      if (recomputed !== bound.contentHash || ver.content_hash !== bound.contentHash) {
+        // Content changed after the decision — the decision no longer covers it (the content-week
+        // pieces_hash precedent, standing-worker).
+        return await block('The content changed after this was approved — approve the new version to publish it.');
+      }
+    }
+
     // ----- gates -----
     // An approved post whose scheduled moment has ARRIVED posts now — the drain (standing-worker)
     // wakes it when the time comes, and a moment that just passed (≤1h: a tick's lag, a short
@@ -115,16 +157,18 @@ Deno.serve(async (req) => {
     // refuses it with the honest reason — a "tonight at 8" post must never quietly go out a day
     // late. A future scheduleAt still rides to the provider for provider-side scheduling.
     const SCHEDULE_GRACE_MS = 60 * 60 * 1000;
-    let scheduleAt = (row.scheduled_for as string | null) ?? null;
+    let scheduleAt = versionContent ? versionContent.scheduledFor : ((row.scheduled_for as string | null) ?? null);
     if (scheduleAt) {
       const lateMs = Date.now() - new Date(scheduleAt).getTime();
       if (lateMs >= 0 && lateMs <= SCHEDULE_GRACE_MS) scheduleAt = null;
     }
-    const draft: SocialDraft = {
-      text: row.body ?? '', platforms: (row.platforms ?? []) as string[],
-      mediaUrls: (row.media_urls ?? []) as string[],
-      scheduleAt,
-    };
+    const draft: SocialDraft = versionContent
+      ? { text: versionContent.body, platforms: versionContent.platforms, mediaUrls: versionContent.mediaUrls, scheduleAt }
+      : {
+        text: row.body ?? '', platforms: (row.platforms ?? []) as string[],
+        mediaUrls: (row.media_urls ?? []) as string[],
+        scheduleAt,
+      };
     // Re-run the honesty/refusal gate server-side — a doc a platform would reject never goes out.
     const chk = checkDraft(draft, new Date().toISOString());
     if (!chk.ok) return await block(chk.reason ?? 'Not sendable.');
@@ -145,6 +189,60 @@ Deno.serve(async (req) => {
     }
     const aiGate = disclosureGate(draft.text, prov);
     if (aiGate) return await block(aiGate);
+
+    if (versionContent) {
+      // FACT FRESHNESS AT SEND TIME (app_0139). A post can sit approved for days; a fact can go
+      // stale, be retired, or pass its review date in between. The decision covered a claim that was
+      // true when it was made — not one that stopped being true since.
+      if (versionContent.factIds.length) {
+        const { data: factRows } = await admin.from('re_facts')
+          .select('id, claim, value_text, status, reviewed_at, review_due_at, re_fact_sources(count)')
+          .in('id', versionContent.factIds).limit(100);
+        const facts = ((factRows ?? []) as Record<string, unknown>[]).map((f) => parseFact({
+          ...f,
+          source_count: Array.isArray(f.re_fact_sources)
+            ? Number((f.re_fact_sources[0] as { count?: number } | undefined)?.count ?? 0)
+            : 0,
+        })).filter((f): f is NonNullable<typeof f> => !!f);
+        const stale = factGate(versionContent.factIds, facts, new Date().toISOString());
+        if (stale) return await block(stale);
+      }
+      // THE BROKERAGE LINE. Required where it is configured, exactly like CAN-SPAM's physical
+      // address is required in send-email — the caption is where a licensed agent must carry it.
+      const complianceProblem = complianceGate(draft.text, versionContent.complianceLine);
+      if (complianceProblem) return await block(complianceProblem);
+
+      // MEDIA BYTES. generate-video and render-video upload with upsert:true to a deterministic
+      // path, so the bytes behind an approved URL can change WITHOUT the URL changing — binding the
+      // words while the picture floats free would be a half-binding. The approved digest is compared
+      // against the bytes as they are right now.
+      //
+      // If the bytes cannot be read (network, timeout, a host that went away), this does NOT block:
+      // a transient fetch failure must not strand an approved post. It is recorded on the run
+      // instead, so "we could not verify the image" is visible rather than assumed.
+      const digests = versionContent.mediaDigests;
+      const digestUrls = Object.keys(digests).slice(0, 4);
+      const mediaUnverified: string[] = [];
+      for (const url of digestUrls) {
+        try {
+          const mres = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+          if (!mres.ok) { mediaUnverified.push(url); continue; }
+          const now = await bytesDigest(await mres.arrayBuffer());
+          if (now !== digests[url]) {
+            return await block('The media on this post was replaced after it was approved — approve the new version to publish it.');
+          }
+        } catch {
+          mediaUnverified.push(url);
+        }
+      }
+      if (mediaUnverified.length) {
+        await ledger({
+          status: 'ok', request: { post_row_id: rowId },
+          response: { media_unverified: mediaUnverified.length },
+          error: 'Could not re-read attached media to verify it is unchanged.',
+        });
+      }
+    }
 
     const conn = await getConnection(admin, uid, 'ayrshare');
     if (!conn?.access_token) return await block('No social account connected — connect a provider (Ayrshare) in Settings first.');
@@ -168,7 +266,33 @@ Deno.serve(async (req) => {
     }
     if (profileKey) headers['Profile-Key'] = profileKey;
 
-    const res = await fetch(AYRSHARE_URL, { method: 'POST', headers, body: JSON.stringify(providerPayload(draft)), signal: AbortSignal.timeout(30_000) });
+    // THE SEND — and the one case the old code could not survive. A thrown fetch (30s abort, DNS,
+    // a dropped connection) used to escape to the outer catch: the claim was never released, the
+    // post row was never touched, and it sat 'queued'-and-claimed forever. Worse, the abort can fire
+    // AFTER the provider accepted the post, so the post could be LIVE while our row said 'queued'
+    // with no provider id — and social-sync only looks at rows that HAVE one, so nobody would ever
+    // see it. 'in_flight' + claimed_at says the honest thing: it was sent, the answer is unknown,
+    // and it must be reconciled before any retry that could duplicate it.
+    let res: Response;
+    try {
+      res = await fetch(AYRSHARE_URL, { method: 'POST', headers, body: JSON.stringify(providerPayload(draft)), signal: AbortSignal.timeout(30_000) });
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      const nowIso = new Date().toISOString();
+      await admin.from('social_posts').update({
+        status: 'in_flight', claimed_at: nowIso,
+        error: 'The provider did not answer in time. This may or may not have posted — it will be checked before anything is retried.',
+      }).eq('id', rowId);
+      await ledger({ status: 'retrying', request: { post_row_id: rowId }, error: `provider timeout: ${why.slice(0, 200)}` });
+      await admin.from('mind_events').insert({
+        owner_id: uid, source: 'execution', event_type: 'note',
+        subject: 'A social post was sent but the provider never answered — it needs checking before any retry.',
+        payload: { key: `social:${rowId}`, post_row_id: rowId, in_flight: true },
+      }).then(() => {}, () => {});
+      // The claim is deliberately NOT released: releasing it would invite a second send of a post
+      // that may already be live.
+      return json({ ok: false, status: 'in_flight', error: 'The provider did not answer in time — this post is being reconciled.' }, 504);
+    }
     const out = await res.json().catch(() => ({} as Record<string, unknown>));
     if (!res.ok) {
       const msg = String((out as { message?: string })?.message ?? `HTTP ${res.status}`);
@@ -181,15 +305,20 @@ Deno.serve(async (req) => {
 
     const mapped = mapProviderResult(out as { status?: string; postIds?: { status?: string }[]; errors?: unknown[] }, scheduled);
     const providerId = (out as { id?: string })?.id ?? null;
+    // The link a human can actually open. Absent for a scheduled post (nothing exists yet) and for
+    // any platform that returns none — social-sync fills those in later if the provider offers them.
+    const urls = platformUrls(out);
     const now = new Date().toISOString();
     await admin.from('social_posts').update({
       status: mapped, provider_post_id: providerId,
+      ...(Object.keys(urls).length ? { post_urls: urls } : {}),
       posted_at: mapped === 'posted' ? now : null,
+      claimed_at: null,
       error: mapped === 'failed' ? 'Provider reported a per-platform failure — check the provider dashboard.' : null,
     }).eq('id', rowId);
     if (mapped === 'posted') await episodeSync('posted', null);
     if (mapped === 'failed') await episodeSync('failed', 'Provider reported a per-platform failure — check the provider dashboard.');
-    await ledger({ status: mapped === 'failed' ? 'failed' : 'ok', request: { post_row_id: rowId, platforms: draft.platforms }, response: { provider_id: providerId, mapped } });
+    await ledger({ status: mapped === 'failed' ? 'failed' : 'ok', request: { post_row_id: rowId, platforms: draft.platforms }, response: { provider_id: providerId, mapped, post_urls: urls } });
     await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: now, provider_id: providerId, status: mapped } }).eq('id', approval_id);
     await admin.from('mind_events').insert({
       owner_id: uid, source: 'execution', event_type: 'note',
@@ -199,7 +328,7 @@ Deno.serve(async (req) => {
       payload: { key: `social:${rowId}`, post_row_id: rowId, platforms: draft.platforms, status: mapped },
     }).then(() => {}, () => {});
 
-    return json({ ok: mapped !== 'failed', status: mapped, provider_id: providerId, warnings: chk.warnings });
+    return json({ ok: mapped !== 'failed', status: mapped, provider_id: providerId, post_urls: urls, warnings: chk.warnings });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

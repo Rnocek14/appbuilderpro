@@ -4,7 +4,7 @@
 // build demos, and then refuse to queue any pitch (the demo link would be broken), so the
 // operator sees "nothing happened" with no reason. This core turns every prerequisite into a
 // visible pass/fail with the exact fix, and derives three honest gates:
-//   canHunt     — can find businesses + build pitchable demos (Places key + APP_ORIGIN)
+//   canHunt     — can find businesses + build pitchable demos (SOMETHING to search with + APP_ORIGIN)
 //   canSend     — can actually email a pitch (Resend + from-address + CAN-SPAM address + switch)
 //   canAutoHunt — the DAILY unattended hunt will fire (canHunt + the clock armed)
 // Nothing here talks to a DB or network — huntReadinessRun.ts gathers the inputs and calls this.
@@ -13,7 +13,11 @@ export type ReadinessNeed = 'hunt' | 'send' | 'auto';
 
 export interface ReadinessInputs {
   appOriginSet: boolean;       // APP_ORIGIN env — the demo link's base; unset ⇒ pitches never queue
-  placesKeySet: boolean;       // GOOGLE_PLACES_API_KEY — business discovery
+  /** ANTHROPIC_API_KEY. Claude finds businesses on its own (discover-run source:'claude'), so this
+   *  ALONE satisfies discovery. This input did not exist while Places was the only finder, which is
+   *  why the light told an owner with a working Claude key that they were "not ready to hunt". */
+  aiKeySet: boolean;
+  placesKeySet: boolean;       // GOOGLE_PLACES_API_KEY — optional second source of listings
   resendKeySet: boolean;       // RESEND_API_KEY — the send provider
   fromEmail: string | null;    // outreach_settings.from_email
   physicalAddress: string | null; // outreach_settings.physical_address (CAN-SPAM: legally required)
@@ -37,21 +41,24 @@ export interface Readiness {
 }
 
 export function huntReadiness(i: ReadinessInputs): Readiness {
+  // Every `fix` names a place in THIS app that can do it. They used to name environment variables
+  // and a hosting dashboard, which was accurate and useless: the one screen that could actually set
+  // them did not exist yet. It does now, so the fix is a sentence and a page, not a command line.
   const items: ReadinessItem[] = [
-    { key: 'places', need: 'hunt', ok: i.placesKeySet,
-      label: 'Google Places key', fix: 'Set GOOGLE_PLACES_API_KEY in Supabase secrets — without it, no businesses are found.' },
+    { key: 'finder', need: 'hunt', ok: i.aiKeySet || i.placesKeySet,
+      label: 'Something to search with', fix: 'Add your Claude key on Start here, step 2. Claude finds businesses on its own — Google’s listings are an optional extra, not a requirement.' },
     { key: 'app_origin', need: 'hunt', ok: i.appOriginSet,
-      label: 'App origin (demo link base)', fix: 'Set APP_ORIGIN to your deployed URL. ⚠ Until it is set, hunts build demos but NO pitch is ever queued (the demo link would be broken).' },
+      label: 'This app’s own web address', fix: 'Add it on Start here, step 3. ⚠ Until it is set, sites still get built and NO email is ever written to go with them, because the link in it would be broken — so it looks like nothing happened.' },
     { key: 'resend', need: 'send', ok: i.resendKeySet,
-      label: 'Email provider', fix: 'Set RESEND_API_KEY (and verify your sending domain in Resend) so approved pitches can actually send.' },
+      label: 'Something to send email with', fix: 'Add your Resend key on Start here, step 4, and verify your sending domain with Resend.' },
     { key: 'from_email', need: 'send', ok: !!(i.fromEmail && i.fromEmail.trim()),
-      label: 'From address', fix: 'Add your from_email in Setup → outreach settings — every send needs a real sender.' },
+      label: 'The address your email comes from', fix: 'Add it in Settings, under email. Every email needs a real sender.' },
     { key: 'physical_address', need: 'send', ok: !!(i.physicalAddress && i.physicalAddress.trim()),
-      label: 'Mailing address (CAN-SPAM)', fix: 'Add a physical mailing address in Setup — U.S. law requires it in every commercial email; send-email refuses without it.' },
+      label: 'A real mailing address', fix: 'Add one in Settings, under email. U.S. law requires a physical address in every commercial email, and sending refuses without it.' },
     { key: 'kill_switch', need: 'send', ok: i.outboundEnabled,
-      label: 'Outbound switch ON', fix: 'Flip outbound_enabled on in Setup — it is OFF by default so nothing sends until you opt in.' },
+      label: 'Permission to send at all', fix: 'Turn sending on in Settings, under email. It is off until you switch it on, so nothing can leave by accident.' },
     { key: 'clock', need: 'auto', ok: i.clockArmed,
-      label: 'Heartbeat armed (daily auto-hunt)', fix: 'Arm the heartbeat on the Health page. On-demand hunts from Win Clients work without it; only the DAILY automatic hunt needs it.' },
+      label: 'The clock, running', fix: 'Start the clock on Start here, step 5. Searching when you press the button works without it — only searching every day on its own needs it.' },
   ];
 
   const okFor = (need: ReadinessNeed) => items.filter((it) => it.need === need).every((it) => it.ok);
@@ -64,9 +71,9 @@ export function huntReadiness(i: ReadinessInputs): Readiness {
 
 /** One-line human summary of where things stand — for a badge/toast. */
 export function readinessLine(r: Readiness): string {
-  if (r.canSend && r.canAutoHunt) return 'Ready — find, build, and send are all live, and the daily hunt will fire.';
-  if (r.canSend && r.canHunt) return 'Ready to hunt and send on demand — arm the heartbeat to run the daily hunt automatically.';
-  if (r.canHunt && !r.canSend) return 'Can find businesses and build demos, but sending is not configured yet — see below.';
-  if (!r.canHunt) return 'Not ready to hunt yet — the discovery/link prerequisites below are missing.';
-  return 'Some prerequisites are missing — see below.';
+  if (r.canSend && r.canAutoHunt) return 'Everything is set up — you can search, build and send, and it will search every day on its own.';
+  if (r.canSend && r.canHunt) return 'You can search, build and send right now. Start the clock on Start here if you want it searching every day without you.';
+  if (r.canHunt && !r.canSend) return 'You can search and build sites, but nothing can be emailed yet.';
+  if (!r.canHunt) return 'Not set up yet — finish Start here and this turns green.';
+  return 'A couple of things are still missing.';
 }

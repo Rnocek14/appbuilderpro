@@ -72,19 +72,27 @@ export function WakingMoment({ name }: { name: string }) {
     return (
       <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">
         <p className="font-display text-lg font-semibold text-forge-ink">{greeting}</p>
-        <p className="mt-1 text-sm text-forge-dim">{awayLines[0]?.text ?? 'Say anything — a question, a business, a thing you want to build — and I\'ll make it a world.'}</p>
+        <p className="mt-1 text-sm text-forge-dim">{awayLines[0]?.text ?? 'Tell me what you want to get done and I\'ll set it up. Or start with one of these.'}</p>
+        {/* The first screen of a brand-new account used to offer three doors, none of which was the
+            thing this app is FOR. The money loop — find local businesses with bad websites, build
+            them one, email them — now leads. Explore keeps its door; it just stopped outranking the
+            work. Each label says the outcome, not the name of the room it opens. */}
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <button onClick={() => navigate('/garvis/leads')}
+            className="rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-forge-ember transition-colors hover:bg-forge-ember/20">
+            <b className="font-medium">Find businesses to pitch</b> — local ones with bad websites
+          </button>
           <button onClick={() => navigate('/garvis/webs')}
             className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
-            <b className="font-medium text-forge-ink">Start a business</b> — set up marketing, contacts, and studios
-          </button>
-          <button onClick={() => navigate('/garvis/explore')}
-            className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
-            <b className="font-medium text-forge-ink">Chase a rabbit hole</b> — explore an idea as a galaxy
+            <b className="font-medium text-forge-ink">Set up a business of your own</b> — its marketing, contacts and posts in one place
           </button>
           <button onClick={() => navigate('/new')}
             className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
-            <b className="font-medium text-forge-ink">Build an app</b> — describe it, watch it generate
+            <b className="font-medium text-forge-ink">Build an app</b> — describe it and watch it get built
+          </button>
+          <button onClick={() => navigate('/garvis/explore')}
+            className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
+            <b className="font-medium text-forge-ink">Explore an idea</b> — wander a topic and keep what you find
           </button>
         </div>
       </div>
@@ -97,13 +105,13 @@ export function WakingMoment({ name }: { name: string }) {
       <button
         onClick={() => setCollapsedBrief(false)}
         className="mb-4 flex w-full items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/50 px-4 py-2.5 text-left text-sm text-forge-dim transition-colors hover:border-forge-ember/40"
-        title="Expand this morning's brief"
+        title="Read this morning's summary"
       >
         <span className="text-forge-ink">{greeting}</span>
         <span className="truncate">
-          {quiet ? 'All quiet.' : `${moves.length} move${moves.length === 1 ? '' : 's'} waiting${awayLines.length ? ` · ${awayLines.length} update${awayLines.length === 1 ? '' : 's'} while you were away` : ''}.`}
+          {quiet ? 'Nothing waiting.' : `${moves.length} thing${moves.length === 1 ? '' : 's'} waiting on you${awayLines.length ? ` · ${awayLines.length} thing${awayLines.length === 1 ? '' : 's'} happened while you were away` : ''}.`}
         </span>
-        <span className="ml-auto shrink-0 text-[11px] text-forge-ember">expand</span>
+        <span className="ml-auto shrink-0 text-[11px] text-forge-ember">read it</span>
       </button>
     );
   }
@@ -114,9 +122,11 @@ export function WakingMoment({ name }: { name: string }) {
 
       {quiet && (
         <p className="mt-1 text-sm text-forge-dim">
-          All quiet — no replies waiting, nothing blocked, nothing new since you last looked.{' '}
-          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your businesses</button>
-          {' '}to push something forward.
+          Nothing is waiting on you — nobody has written back, nothing is blocked, nothing new since
+          you last looked.{' '}
+          <button onClick={() => navigate('/garvis/leads')} className="text-forge-ember hover:underline">Go find businesses to pitch</button>
+          , or{' '}
+          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">open one of your own businesses</button>.
         </p>
       )}
 
@@ -149,13 +159,15 @@ export function WakingMoment({ name }: { name: string }) {
                 <p className="mt-0.5 text-xs text-forge-dim">{m.why}</p>
                 {m.expected && (
                   <p className="mt-1 flex items-baseline gap-1.5 text-[11px] text-forge-dim/80">
+                    {/* This badge used to print the raw enum — "measured", "heuristic",
+                        "structural" — in uppercase mono, which tells the owner nothing about how
+                        much to trust the line beside it. It now says where the claim comes from. */}
                     <span
-                      title={m.expected.basis === 'measured' ? 'From your own data' : m.expected.basis === 'heuristic' ? 'Domain knowledge, not your data yet' : 'Follows from how things are wired'}
                       className={cn(
-                        'rounded border px-1 py-px font-mono text-[8.5px] uppercase tracking-wide',
+                        'rounded border px-1 py-px text-[9px]',
                         m.expected.basis === 'measured' ? 'border-forge-ok/40 text-forge-ok' : 'border-forge-border text-forge-dim/70',
                       )}
-                    >{m.expected.basis}</span>
+                    >{m.expected.basis === 'measured' ? 'from your own numbers' : m.expected.basis === 'heuristic' ? 'generally true, not measured here' : 'how this is wired'}</span>
                     {m.expected.text}
                   </p>
                 )}
@@ -175,7 +187,7 @@ export function WakingMoment({ name }: { name: string }) {
                 >
                   {m.action.label} <ChevronRight size={12} />
                 </button>
-                <button onClick={() => dismiss(m.key)} title="Not now (quiet for a week)" className="p-1 text-forge-dim/60 hover:text-forge-dim">
+                <button onClick={() => dismiss(m.key)} aria-label={`Hide "${m.title}" for a week`} title="Not now — hide this for a week" className="p-1 text-forge-dim/60 hover:text-forge-dim">
                   <X size={13} />
                 </button>
               </div>
@@ -183,7 +195,7 @@ export function WakingMoment({ name }: { name: string }) {
           ))}
           {moves.length > 3 && !showAll && (
             <button onClick={() => setShowAll(true)} className="flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ink">
-              <Sparkles size={12} className="text-forge-ember" /> see all ({moves.length}) — the cap limits emphasis, never access
+              <Sparkles size={12} className="text-forge-ember" /> Show the other {moves.length - 3}
             </button>
           )}
         </div>

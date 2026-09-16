@@ -138,6 +138,12 @@ const FLAVOR_WORKSHOPS: Record<Flavor, WorkshopDefinition> = {
     description: 'Develop the angle, script the beats, and storyboard the short before sending it to a clip engine.',
     group: 'grow', tone: 'violet', steps: ['Find the hook', 'Script the beats', 'Build the storyboard'],
   },
+  listing_campaign: {
+    name: 'Campaign Workshop', kicker: 'Facts first, then the post',
+    outcome: 'A neighborhood post built only from claims you verified, bound to the version you approved.',
+    description: 'Keep a community\'s facts with their sources and review dates, draft from the ones that are still good, and send the draft for your own approval — a missing fact stays a visible hole.',
+    group: 'grow', tone: 'ember', steps: ['Verify the facts', 'Draft from them', 'Approve what publishes'],
+  },
   lead_engine: {
     name: 'Lead Market Workshop', kicker: 'Watch the public record',
     outcome: 'Ranked commercial leads from permits, licenses, and registrations — every one traceable to its source.',

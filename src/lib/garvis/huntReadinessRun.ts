@@ -30,6 +30,7 @@ export async function fetchHuntReadiness(): Promise<Readiness> {
 
   return huntReadiness({
     appOriginSet: secretSet('APP_ORIGIN'),
+    aiKeySet: secretSet('ANTHROPIC_API_KEY'),
     placesKeySet: secretSet('GOOGLE_PLACES_API_KEY'),
     resendKeySet: secretSet('RESEND_API_KEY'),
     fromEmail: outreach?.from_email ?? null,
