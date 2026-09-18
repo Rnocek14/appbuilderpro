@@ -307,11 +307,17 @@ export const APP_MARKETING_TEMPLATE: WebTemplate = {
 
 /** REAL-ESTATE MARKETING — the focused workspace (docs/real-estate-marketing-implementation.md).
  *
- *  Deliberately FIVE areas, not twenty. MOM_REAL_ESTATE_TEMPLATE is a map of every option a realtor
+ *  Deliberately SEVEN areas, not twenty. MOM_REAL_ESTATE_TEMPLATE is a map of every option a realtor
  *  could ever want, which is precisely the "so many places to go" complaint the doctrine exists to
  *  answer — and because none of its flavors is studio-first, that world opens on the canvas with the
  *  work behind an "Advanced" disclosure. This one leads with the campaign studio and keeps the
  *  set-once areas beside it, so the page opens on the work.
+ *
+ *  It was five until a real operator's own list arrived asking for six platforms and a monthly
+ *  newsletter. Two areas is the honest cost of carrying that; the alternative was telling her to
+ *  keep a second workspace open, which is the same complaint wearing a different hat. The studio
+ *  still opens first (campaignDesk in WorkWeb.tsx keys off the listing_campaign flavor, not the
+ *  area count), so the page still opens on the work.
  *
  *  The chain it exists to carry, in order: facts → campaign → approval → scheduled → posted →
  *  inquiries → results. One community proves it; the second community proves it generalised. */
@@ -323,6 +329,13 @@ export const REAL_ESTATE_CAMPAIGN_TEMPLATE: WebTemplate = {
   nodes: [
     N('campaigns', 'Campaign Studio', 'The daily surface: what needs a decision, what is scheduled, what worked — and one button to draft the next post from verified facts.', 'studio', 'listing_campaign'),
     N('communities', 'Communities & Facts', 'Every claim with its source and the date it must be re-checked. A fact without a source never reaches published copy.', 'intel', 'market'),
+    // The campaign studio publishes text to Facebook alone (media attachment is Phase 1b), but a
+    // working agent's presence is six accounts, not one. This area is the SAME approval-gated rail
+    // with the full platform row and a media field — Instagram, TikTok and YouTube refuse a
+    // text-only post here rather than failing at the provider. Without it this world could not
+    // carry most of the operator's own list, and the answer was "go use a different workspace".
+    N('social', 'Social Posts', 'One caption out to the accounts that matter — Facebook, Instagram, LinkedIn, Google Business, YouTube, TikTok. The ones that require a photo or video say so before you queue them.', 'studio', 'social'),
+    N('newsletter', 'Newsletter', 'The monthly letter — written here, sent to a segment from Contacts with one approval and an honest count of who it can actually reach.', 'studio', 'email'),
     N('destinations', 'Destinations', 'Which accounts a post goes to, and the brokerage line that rides with every one of them.', 'vault', 'brand'),
     N('inquiries', 'Inquiries', 'Everyone who asked — with the post and campaign that caused it, when that is actually known.', 'audience', 'crm'),
     N('results', 'Results', 'Posts, inquiries, appointments and signed listings — joined, with unknown attribution left honestly unknown.', 'ledger', 'generic'),
