@@ -19,6 +19,7 @@ on:
       - 'scripts/probe.mjs'
       - 'scripts/prototype-walkthrough.mjs'
       - 'scripts/claims-walkthrough.mjs'
+      - 'scripts/seed-walkthrough.mjs'
       - 'scripts/lib/probe-core.mjs'
       - 'scripts/generated-app-probe.mjs'
       - 'scripts/fixtures/generated-app/**'
@@ -30,6 +31,7 @@ on:
       - 'scripts/probe.mjs'
       - 'scripts/prototype-walkthrough.mjs'
       - 'scripts/claims-walkthrough.mjs'
+      - 'scripts/seed-walkthrough.mjs'
       - 'scripts/lib/probe-core.mjs'
       - 'scripts/generated-app-probe.mjs'
       - 'scripts/fixtures/generated-app/**'
@@ -101,6 +103,12 @@ jobs:
 
       - name: Wave 2 — do the generated prototypes keep theirs?
         run: npm run walkthrough:claims
+
+      # The seed (P15) is the one prototype driven by synthetic TOUCH rather than a mouse: hold, peek,
+      # detents, row paging, cancel, the velocity guard. Same rule as the others — a red run is a claim
+      # about the page until someone reads the assertion.
+      - name: Wave 3 — does the seed keep its promise under a thumb?
+        run: npm run walkthrough:seed
 
       # The generator's own output, built and driven. The 'broken' fixture carries four planted
       # defects a compiler cannot see; this step asserts the two layers still catch them, so a

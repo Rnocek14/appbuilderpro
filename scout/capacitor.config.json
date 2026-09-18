@@ -1,0 +1,11 @@
+{
+  "appId": "com.scout.feeltest",
+  "appName": "Scout",
+  "webDir": "www",
+  "backgroundColor": "#0B0E14",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "backgroundColor": "#0B0E14"
+  }
+}

@@ -1,0 +1,88 @@
+# The drift, deployed — a private static site that carries today's real shorts world.
+#
+# Two jobs in one: the daily drop (scripts/shorts-drop.ts against the YouTube Data API) and the deploy of
+# the packed drift (scripts/pack-drift.mjs) to Cloudflare Pages. Runs on a schedule and on pushes that
+# touch the drift. Every step degrades honestly:
+#   - no YOUTUBE_API_KEY secret      → the committed edition is deployed as-is (no fixture ever overwrites a
+#                                      real edition; the script refuses)
+#   - no Cloudflare secrets          → the drop and the pack still run and the folder is kept as a build
+#                                      artifact; nothing is deployed
+#
+# Set-up, once (all free tiers):
+#   1. Cloudflare → Workers & Pages → Create → Pages → "Direct Upload", project name `drift`.
+#   2. Cloudflare → My Profile → API Tokens → create a token with "Cloudflare Pages: Edit"; copy the
+#      Account ID from the Pages overview. Add both as repository secrets: CLOUDFLARE_API_TOKEN,
+#      CLOUDFLARE_ACCOUNT_ID.
+#   3. Cloudflare → Zero Trust → Access → Applications → add the Pages hostname with a policy that allows
+#      only your email and your testers' emails (one-time code). This is what keeps the deployment private
+#      until the provisional is filed — do not skip it.
+#   4. Add YOUTUBE_API_KEY as a repository secret (restricted to the YouTube Data API v3).
+name: Drift deploy
+
+on:
+  schedule:
+    - cron: '0 11 * * *'          # daily, 11:00 UTC (≈ 4:00 Pacific, after the quota resets at midnight Pacific)
+  push:
+    branches: ['claude/dot-field-navigation-tw6ge0', 'main']
+    paths:
+      - 'prototypes/the-drift.html'
+      - 'prototypes/the-seed.html'
+      - 'prototypes/worlds/**'
+      - 'scripts/shorts-drop.ts'
+      - 'scripts/pack-drift.mjs'
+      - 'src/lib/shortsWorld.ts'
+      - 'src/lib/worldPlacement.ts'
+      - '.github/workflows/drift-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: drift-deploy
+  cancel-in-progress: false
+
+jobs:
+  drop-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Today's drop (only with a key; the committed edition otherwise)
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          if [ -n "$YOUTUBE_API_KEY" ]; then
+            npx tsx scripts/shorts-drop.ts --per 40
+          else
+            echo "YOUTUBE_API_KEY not set — deploying the committed edition"
+          fi
+
+      - name: Pure gates on the drop
+        run: |
+          npm run -s verify:worldplacement
+          npm run -s verify:shortsworld
+
+      - name: Pack
+        run: node scripts/pack-drift.mjs
+
+      - name: Keep the packed build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-drift
+          path: dist-drift
+          retention-days: 7
+
+      - name: Deploy to Cloudflare Pages (only when the secrets exist)
+        if: ${{ env.CF_TOKEN != '' && env.CF_ACCOUNT != '' }}
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist-drift --project-name=drift --commit-dirty=true

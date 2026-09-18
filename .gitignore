@@ -24,3 +24,4 @@ scratchpad/
 
 # Live-fetched prospect pages (scan:live --keep) — real third-party HTML, not ours to commit
 scripts/scanProbe/fetched/
+dist-drift
