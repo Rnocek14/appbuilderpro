@@ -28,10 +28,12 @@ Her list is nineteen lines, but it is really six jobs:
       standing between her and posting to them is the linking step.
 - [ ] **`APP_ORIGIN`** set to the deployed app URL, or links in posts point nowhere.
 - [ ] **Health page** (`/garvis/health`) — secrets green, heartbeat stamping.
-- [ ] **Create the workspace.** Home → the real-estate card → *Real Estate Marketing*. It opens on
-      the Campaign Studio. Eight areas: Campaign Studio · Communities & Facts · Social Posts ·
-      Newsletter · **Postcards & Farming** · Destinations · Inquiries · Results.
-- [ ] Open `/garvis/queue` once alone, so you know the approval screen before she is watching.
+- [ ] **Open the real-estate door: `/re`.** Five tabs — **Post · Queue · Newsletter · Postcards ·
+      People** — and nothing else on screen. If the workspace does not exist yet it shows one button
+      to create it; if the database is unreachable it says so instead of hiding. Once this browser
+      has been through `/re`, login lands there. The rest of the platform is behind "Everything
+      else" — one link, never gone.
+- [ ] Open the **Queue** tab once alone, so you know the approval screen before she is watching.
 - [ ] Print or open `docs/handoff/Real Estate Expenses 2026.xlsx` — that is item F, already done.
 
 ---
@@ -67,7 +69,7 @@ supposed to carry marketing.
 Her list names Instagram, Facebook, Google Business, TikTok, LinkedIn, YouTube, plus "any other
 platforms that make sense," and separately calls out reels and posts.
 
-**It is one screen now.** In the Campaign Studio, under the draft: **Add a photo** (straight from her
+**It is one screen now.** The **Post** tab. Under the draft: **Add a photo** (straight from her
 phone — it uploads and the approval binds to those exact bytes), then six chips for where it goes.
 Tick the ones she wants; the choice is remembered. Queue one approval. Done.
 
@@ -121,7 +123,8 @@ post with a real link → an inquiry attributed back to it → an outcome.**
    purpose — it is the reason to trust the thing.
 6. Fill the two required fields: who signs it, and the **brokerage line**. Publication is refused
    server-side without the brokerage line, on every post.
-7. Schedule it, queue it, and walk to `/garvis/queue` **together so she clicks approve**. That click
+7. Schedule it, queue it, and open the **Queue** tab **together so she clicks approve** — the badge
+   on the tab shows how many decisions are waiting. That click
    is the moment worth the whole meeting: the approval binds to the exact text, media, destinations
    and time she saw, and editing any of it afterward makes publishing refuse and name the field that
    changed.
@@ -136,8 +139,8 @@ page. There is no second surface to copy into.
 She wrote "newsletter" three times. It matters to her more than anything else on the list except the
 photo.
 
-- **Writing it:** the `Newsletter` area of her workspace.
-- **Sending it:** `/garvis/contacts` → the batch send card. Pick a segment, see the **honest
+- **Writing and sending it:** the **Newsletter** tab — one room. Compose once, see the honest
+  reachable count with exclusions named, queue one approval. Pick a segment, see the **honest
   reachable count** with exclusions named, queue one approval; the clock then drains it under a daily
   cap, re-checking suppression for every recipient at send time. `{{name}}` and `{{first_name}}`
   merge; anything else refuses at compose rather than sending broken.
@@ -152,8 +155,8 @@ photo.
 
 ## 5. Job E — postcards and farming specific areas
 
-**Where:** the `Postcards & Farming` area of her workspace — the postcard designer and the
-neighborhood-farm panel share the room, because the list decides *who* and the card decides *what*.
+**Where:** the **Postcards** tab — the neighborhood-farm panel and the postcard designer share the
+room, because the list decides *who* and the card decides *what*.
 
 Her own sixteen-step chain, marked against what the code does. Green = the app does it. Amber = she
 does it, the app keeps it honest. Red = money or a vendor, not code.
@@ -200,8 +203,8 @@ owns is the right answer for now, and it is a better answer than waiting.)*
 has two plausible readings and they lead to completely different work:
 
 1. **Past clients and closed deals → contacts.** This is the operationally urgent one, because the
-   newsletter in Job D has no audience until it happens. **Where:** the `Inquiries` area → *Upload
-   list (CSV)*. It finds the email column on its own and tolerates a header row; the name it keeps is
+   newsletter in Job D has no audience until it happens. **Where:** the **People** tab → *Import a
+   CSV*. It finds the email column on its own and tolerates a header row; the name it keeps is
    the first non-email column, so a "first, last, email, phone" export lands as first names only and
    drops the phone. Good enough for the first newsletter; a fuller import is on the list below.
 2. **Transaction paperwork → documents.** Templates from a sample document, merge with visible
@@ -233,6 +236,8 @@ that unblocks the newsletter she asked for three times.
 
 ### Done on this branch
 
+- **A real-estate door: `/re`.** Five tabs over her workspace, none of the platform's forty routes
+  on screen. Login remembers it. An unreachable database says so; a missing workspace is one button.
 - The workspace carries her list: **Social Posts**, **Newsletter**, **Postcards & Farming** areas
   beside the Campaign Studio. Still opens on the studio. Eight areas, not twenty.
 - **One screen for a post:** photo upload + six platform chips in the Campaign Studio, with the
@@ -260,8 +265,8 @@ is on the critical path to her first month of posting and one newsletter.
 1. **The rhythm.** A standing order — "an Abbey Springs owner brief every Tuesday, drafted from the
    facts on file, one approval" — so posting stops depending on her remembering. The content-week
    producer exists for other worlds; wiring it to `listing_campaign` is the next real feature.
-2. **Newsletter compose + send in one place.** Writing lives in the Newsletter area, sending lives
-   on Contacts. Mount the batch-send card in the Newsletter area so it is one room.
+2. **Its own address.** The same repo can build a second entry that mounts only `/re` and deploy it
+   to its own domain, so it feels like its own product. A config change, not a codebase.
 3. **A fuller contact import** — full name from two columns, keep the phone, tolerate a CRM export's
    extra columns. Her sphere is the newsletter's audience; this is what makes it clean.
 4. **A branded newsletter template.** She wrote "newsletter" three times; plain text will not hold.

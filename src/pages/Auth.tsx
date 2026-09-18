@@ -4,6 +4,7 @@ import { Flame, Mail } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Button, Input, Card } from '../components/ui';
+import { frontDoor } from '../lib/frontDoor';
 
 type Mode = 'signin' | 'signup' | 'magic';
 
@@ -19,7 +20,7 @@ export default function Auth() {
 
   // The front door is Garvis's Command — the surface designed for a first session (waking moment,
   // suggestions, the three first moves). The legacy Projects dashboard stays one nav-click away.
-  if (session) return <Navigate to="/garvis/command" replace />;
+  if (session) return <Navigate to={frontDoor()} replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

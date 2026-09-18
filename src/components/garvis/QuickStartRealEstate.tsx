@@ -48,12 +48,12 @@ export function QuickStartRealEstate({ onToast }: { onToast: (k: 'success' | 'er
   }, []);
 
   const start = async () => {
-    if (existingId) { navigate(`/garvis/webs/${existingId}`); return; }
+    if (existingId) { navigate('/re'); return; }
     setBusy(true);
     try {
       const web = await instantiateWeb(TEMPLATE_ID);
       onToast('success', `Created \u201c${web.title}\u201d \u2014 it opens on the Campaign Studio.`);
-      navigate(`/garvis/webs/${web.worldId}`);
+      navigate('/re');
     } catch (e) {
       onToast('error', e instanceof Error ? e.message : 'Could not set up the workspace.');
       setBusy(false);

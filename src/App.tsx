@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Spinner } from './components/ui';
+import { frontDoor } from './lib/frontDoor';
 
 // The unauthenticated entry surface stays eager — it's the first paint and must not flash a spinner.
 import Landing from './pages/Landing';
@@ -55,6 +56,14 @@ const WorkWebs = lazy(() => import('./pages/WorkWebs'));
 const Channels = lazy(() => import('./pages/Channels'));
 const LeadEngine = lazy(() => import('./pages/LeadEngine'));
 const WorkWeb = lazy(() => import('./pages/WorkWeb'));
+const ReShell = lazy(() => import('./pages/re/ReShell'));
+const RePages = {
+  Post: lazy(() => import('./pages/re/RePages').then((m) => ({ default: m.RePost }))),
+  Queue: lazy(() => import('./pages/re/RePages').then((m) => ({ default: m.ReQueue }))),
+  Newsletter: lazy(() => import('./pages/re/RePages').then((m) => ({ default: m.ReNewsletter }))),
+  Postcards: lazy(() => import('./pages/re/RePages').then((m) => ({ default: m.RePostcards }))),
+  People: lazy(() => import('./pages/re/RePages').then((m) => ({ default: m.RePeople }))),
+};
 const SystemAltitude = lazy(() => import('./pages/SystemAltitude'));
 const Universe3D = lazy(() => import('./pages/Universe3D'));
 const PreviewEngine = lazy(() => import('./pages/PreviewEngine'));
@@ -93,7 +102,7 @@ function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: b
 function NotFoundRedirect() {
   const { session, loading } = useAuth();
   if (loading) return <div className="flex min-h-screen items-center justify-center"><Spinner label="One sec…" /></div>;
-  return <Navigate to={session ? '/garvis/command' : '/'} replace />;
+  return <Navigate to={session ? frontDoor() : '/'} replace />;
 }
 
 function AppRoutes() {
@@ -152,6 +161,14 @@ function AppRoutes() {
           {/* Lead Markets — public records → ranked trade leads (docs/lead-engine-master-plan.md).
               In the Prospecting nav section; turnkey city start lives on the page itself. */}
           <Route path="/garvis/lead-engine" element={<Protected><LeadEngine /></Protected>} />
+          {/* THE REAL-ESTATE DOOR — five tabs over the same workspace, none of the rest on screen. */}
+          <Route path="/re" element={<Protected><ReShell /></Protected>}>
+            <Route index element={<RePages.Post />} />
+            <Route path="queue" element={<RePages.Queue />} />
+            <Route path="newsletter" element={<RePages.Newsletter />} />
+            <Route path="postcards" element={<RePages.Postcards />} />
+            <Route path="people" element={<RePages.People />} />
+          </Route>
           <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
           <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
           <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />

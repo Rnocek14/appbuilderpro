@@ -39,6 +39,8 @@ const PROTECTED_ROUTES = [
   '/garvis/automations', '/garvis/client-billing', '/garvis/money', '/garvis/contacts',
   '/garvis/health', '/garvis/setup', '/garvis/webs', '/garvis/universe', '/garvis/working',
   '/garvis/lead-engine',
+  // The real-estate door and each of its tabs.
+  '/re', '/re/queue', '/re/newsletter', '/re/postcards', '/re/people',
 ];
 
 test('every public route renders without real errors', async ({ page }) => {

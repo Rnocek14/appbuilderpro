@@ -6,7 +6,7 @@
 // (reject, done) act instantly and offer Undo — consequences (approve) still ask nothing twice
 // but can never be unsent, so they get no false undo.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bot, Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
 import { useUndoBar } from '../components/garvis/UndoBar';
@@ -37,7 +37,12 @@ type Row =
   | { key: string; lane: 'agent_question'; q: AgentRunQuestion }
   | { key: string; lane: 'message'; m: InboxItem };
 
-export default function Queue() {
+// `embedded` renders the same Queue without the platform shell around it — the real-estate door
+// (/re) mounts it inside its own five-tab layout. One room for decisions, whichever door she used.
+function PassThrough({ children }: { children: ReactNode }) { return <>{children}</>; }
+
+export default function Queue({ embedded = false }: { embedded?: boolean } = {}) {
+  const Shell = embedded ? PassThrough : AppShell;
   const { toast } = useToast();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -270,7 +275,7 @@ export default function Queue() {
       selKey === key ? 'border-forge-ember/60 ring-1 ring-forge-ember/30' : 'border-forge-border');
 
   return (
-    <AppShell>
+    <Shell>
       <div className="mx-auto max-w-3xl px-4 py-8 pb-24">
         <div className="mb-5 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-forge-border bg-forge-panel">
@@ -487,7 +492,7 @@ export default function Queue() {
 
       {/* Undo bar — reversible actions act instantly and regret politely. */}
       {undoBar}
-    </AppShell>
+    </Shell>
   );
 }
 
