@@ -307,15 +307,16 @@ export const APP_MARKETING_TEMPLATE: WebTemplate = {
 
 /** REAL-ESTATE MARKETING — the focused workspace (docs/real-estate-marketing-implementation.md).
  *
- *  Deliberately SEVEN areas, not twenty. MOM_REAL_ESTATE_TEMPLATE is a map of every option a realtor
+ *  Deliberately EIGHT areas, not twenty. MOM_REAL_ESTATE_TEMPLATE is a map of every option a realtor
  *  could ever want, which is precisely the "so many places to go" complaint the doctrine exists to
  *  answer — and because none of its flavors is studio-first, that world opens on the canvas with the
  *  work behind an "Advanced" disclosure. This one leads with the campaign studio and keeps the
  *  set-once areas beside it, so the page opens on the work.
  *
- *  It was five until a real operator's own list arrived asking for six platforms and a monthly
- *  newsletter. Two areas is the honest cost of carrying that; the alternative was telling her to
- *  keep a second workspace open, which is the same complaint wearing a different hat. The studio
+ *  It was five until a real operator's own list arrived asking for six platforms, a monthly
+ *  newsletter, postcards and farm areas. Three areas is the honest cost of carrying that; the
+ *  alternative was telling her to keep a second workspace open, which is the same complaint
+ *  wearing a different hat. The studio
  *  still opens first (campaignDesk in WorkWeb.tsx keys off the listing_campaign flavor, not the
  *  area count), so the page still opens on the work.
  *
@@ -336,6 +337,10 @@ export const REAL_ESTATE_CAMPAIGN_TEMPLATE: WebTemplate = {
     // carry most of the operator's own list, and the answer was "go use a different workspace".
     N('social', 'Social Posts', 'One caption out to the accounts that matter — Facebook, Instagram, LinkedIn, Google Business, YouTube, TikTok. The ones that require a photo or video say so before you queue them.', 'studio', 'social'),
     N('newsletter', 'Newsletter', 'The monthly letter — written here, sent to a segment from Contacts with one approval and an honest count of who it can actually reach.', 'studio', 'email'),
+    // One area, two of her lines: the studio/direct_mail flavor mounts BOTH the postcard designer and
+    // the neighborhood-farm panel (WorkWeb.tsx). Postcards and "farming specific areas" are the same
+    // job seen from two ends — the list decides who, the card decides what — so they share a room.
+    N('postcards', 'Postcards & Farming', 'Import the owner list you bought, see the honest go/no-go on the area, design the 6×9 card. It hands the print shop a deduped, suppressed, USPS-correct PDF and CSV — it never mails anything itself.', 'studio', 'direct_mail'),
     N('destinations', 'Destinations', 'Which accounts a post goes to, and the brokerage line that rides with every one of them.', 'vault', 'brand'),
     N('inquiries', 'Inquiries', 'Everyone who asked — with the post and campaign that caused it, when that is actually known.', 'audience', 'crm'),
     N('results', 'Results', 'Posts, inquiries, appointments and signed listings — joined, with unknown attribution left honestly unknown.', 'ledger', 'generic'),

@@ -9,10 +9,10 @@ Her list is nineteen lines, but it is really six jobs:
 | | The job | Where it stands |
 |---|---|---|
 | **A** | Be present and consistent on six platforms | 1 hour of her hands. Free. **Do this first.** |
-| **B** | Post to all of them, regularly | The app does this today — see §2 |
+| **B** | Post to all of them, regularly | One screen: photo + six platforms in the Campaign Studio — see §2 |
 | **C** | Market content for Abbey Springs and Symphony Bay | The Campaign Studio. This is the engine that feeds B |
 | **D** | A monthly newsletter | Real send rail, plain text, needs contacts + email set up |
-| **E** | Postcards and farming specific areas | Design and list work are real; mailing is not |
+| **E** | Postcards and farming specific areas | Its own area in her workspace. Design and list work are real; mailing is not |
 | **F** | Deal folder and an expense spreadsheet | The spreadsheet is done and in this repo. The deal folder needs one question answered |
 
 ---
@@ -29,8 +29,8 @@ Her list is nineteen lines, but it is really six jobs:
 - [ ] **`APP_ORIGIN`** set to the deployed app URL, or links in posts point nowhere.
 - [ ] **Health page** (`/garvis/health`) — secrets green, heartbeat stamping.
 - [ ] **Create the workspace.** Home → the real-estate card → *Real Estate Marketing*. It opens on
-      the Campaign Studio. Seven areas: Campaign Studio · Communities & Facts · **Social Posts** ·
-      **Newsletter** · Destinations · Inquiries · Results.
+      the Campaign Studio. Eight areas: Campaign Studio · Communities & Facts · Social Posts ·
+      Newsletter · **Postcards & Farming** · Destinations · Inquiries · Results.
 - [ ] Open `/garvis/queue` once alone, so you know the approval screen before she is watching.
 - [ ] Print or open `docs/handoff/Real Estate Expenses 2026.xlsx` — that is item F, already done.
 
@@ -67,29 +67,28 @@ supposed to carry marketing.
 Her list names Instagram, Facebook, Google Business, TikTok, LinkedIn, YouTube, plus "any other
 platforms that make sense," and separately calls out reels and posts.
 
-**Where to do it: the `Social Posts` area of her workspace.** One caption, a media link, tick the
-platforms, pick a time, queue one approval. After she approves it in the Queue, it posts or the
-provider schedules it.
+**It is one screen now.** In the Campaign Studio, under the draft: **Add a photo** (straight from her
+phone — it uploads and the approval binds to those exact bytes), then six chips for where it goes.
+Tick the ones she wants; the choice is remembered. Queue one approval. Done.
 
-What the composer will and will not accept, before she wastes a draft:
+What the chips will and will not accept, before she wastes a draft:
 
 | Platform | Text-only post | Note |
 |---|---|---|
-| Facebook | ✅ | |
+| Facebook | ✅ | on by default |
 | LinkedIn | ✅ | |
-| Google Business | ✅ | caption is capped at 1,500 characters — the composer warns before you queue |
-| **Instagram** | ❌ needs a photo or video | refused at compose, not at the provider |
-| **TikTok** | ❌ needs a photo or video | |
-| **YouTube** | ❌ needs a photo or video | |
+| Google Business | ✅ | caption capped at 1,500 characters — it warns before you queue |
+| **Instagram** | ❌ needs a photo | the chip says *"needs a photo"* until one is attached; the button stays off |
+| **TikTok** | ❌ needs a photo | same |
+| **YouTube** | ❌ needs a photo | same |
 
-The media field takes a **URL**, not a file picker. The path that works today: upload the photo into
-the app's assets, copy the public link, paste it in. Clunky, honest, works. Make her do it once with
-you so she has seen it.
+The `Social Posts` area still exists for a post that is not about a community (a closing, a client
+thank-you, a market-wide note) — same composer, same six platforms, now with a **Choose a photo**
+button beside the URL field.
 
 **Reels and video.** The storyboard → mp4 renderer is real but hands-on, and video posting needs a
 **paid** Ayrshare tier (the free tier is images only — the composer flags a video URL rather than
-letting it fail at the provider). So: reels are possible, they are not yet a one-click thing, and
-they are the honest answer to "what would move the needle most" — which leads to the next line.
+letting it fail at the provider). Reels are possible; they are not yet a one-click thing.
 
 **"Get more likes."** No software makes likes. What the app can actually do about it: post
 consistently without her having to remember, put the same message everywhere at once, and — only on
@@ -127,10 +126,8 @@ post with a real link → an inquiry attributed back to it → an outcome.**
    and time she saw, and editing any of it afterward makes publishing refuse and name the field that
    changed.
 
-**One limit to state:** the Campaign Studio posts **text to Facebook only** — attaching media from
-inside it is the next piece of work. For Instagram and the rest, the fact-checked caption it produces
-gets copied into the `Social Posts` area with a photo. Two surfaces for now; one when media
-attachment lands.
+**Both jobs, one screen:** the fact-checked draft, the photo and the six platforms are all on this
+page. There is no second surface to copy into.
 
 ---
 
@@ -154,6 +151,9 @@ photo.
 ---
 
 ## 5. Job E — postcards and farming specific areas
+
+**Where:** the `Postcards & Farming` area of her workspace — the postcard designer and the
+neighborhood-farm panel share the room, because the list decides *who* and the card decides *what*.
 
 Her own sixteen-step chain, marked against what the code does. Green = the app does it. Amber = she
 does it, the app keeps it honest. Red = money or a vendor, not code.
@@ -200,8 +200,10 @@ owns is the right answer for now, and it is a better answer than waiting.)*
 has two plausible readings and they lead to completely different work:
 
 1. **Past clients and closed deals → contacts.** This is the operationally urgent one, because the
-   newsletter in Job D has no audience until it happens. Contacts arrive from website leads, prospect
-   scans, and CSV uploads into a world's audience area.
+   newsletter in Job D has no audience until it happens. **Where:** the `Inquiries` area → *Upload
+   list (CSV)*. It finds the email column on its own and tolerates a header row; the name it keeps is
+   the first non-email column, so a "first, last, email, phone" export lands as first names only and
+   drops the phone. Good enough for the first newsletter; a fuller import is on the list below.
 2. **Transaction paperwork → documents.** Templates from a sample document, merge with visible
    `[YOU FILL]` holes, e-signature with every envelope approved by a human. Note: **e-sign is on the
    sandbox default, where signatures are not legally binding** — going live needs a review first.
@@ -227,23 +229,55 @@ that unblocks the newsletter she asked for three times.
 
 ---
 
-## 8. What to build next, in order of what it is worth to her list
+## 8. The whole plan — what is done, what she needs to buy, what is left
 
-1. **Media attachment inside the Campaign Studio** — collapses the two-surface workaround in §3 and
-   unlocks Instagram from the fact-checked rail. Nothing else on this list is worth as much.
-2. **An asset picker in the social composer** — kills the upload-then-paste-a-URL step.
-3. **A branded newsletter template** — she asked for the newsletter three times and will not love a
-   plain-text letter for long.
-4. **Receipt-linked expenses in the app**, so the spreadsheet eventually retires into the same ledger
-   as the results.
-5. **A mail vendor behind an approval with a hard cost ceiling** — closes farming steps 11–13.
+### Done on this branch
+
+- The workspace carries her list: **Social Posts**, **Newsletter**, **Postcards & Farming** areas
+  beside the Campaign Studio. Still opens on the studio. Eight areas, not twenty.
+- **One screen for a post:** photo upload + six platform chips in the Campaign Studio, with the
+  media-required refusal named under the draft instead of discovered at the Queue.
+- **Choose a photo** in the general composer, beside the URL field.
+- The expense spreadsheet.
+- A verify suite that fails CI if any of those areas quietly disappears from the template.
+
+### Accounts and keys — the only "plugins" this needs (none are code)
+
+| | What | Why | Cost |
+|---|---|---|---|
+| 1 | **Supabase deploy, `mode=full`** | applies `app_0139`–`app_0141`; nothing real-estate works without it | — |
+| 2 | **Ayrshare** with all six accounts linked | every post on her list | free tier: 1 profile, 50 image posts/mo, **no video, no numbers**. Paid tier when reels or analytics start |
+| 3 | **`APP_ORIGIN`**, `WORKER_SECRET`, `CRON_SECRET`, heartbeat armed | scheduled posts and newsletter batches drain on the clock; without the heartbeat, "scheduled" waits forever | — |
+| 4 | **Resend** + SPF/DKIM on her sending domain + a physical address in outreach settings | the newsletter. The send function refuses without the address (CAN-SPAM) | Resend free tier is fine to start |
+| 5 | Anthropic key | **not needed** for the Campaign Studio — its drafts are deterministic from her facts. Only for AI copy on the boards | optional |
+
+**Not needed now, and say so:** a mail vendor (Lob), a map / parcel-data provider, a video renderer
+(Shotstack), texting (Twilio), DocuSign go-live. Each is real work with a real bill, and none of them
+is on the critical path to her first month of posting and one newsletter.
+
+### Left to build, in the order it is worth to her
+
+1. **The rhythm.** A standing order — "an Abbey Springs owner brief every Tuesday, drafted from the
+   facts on file, one approval" — so posting stops depending on her remembering. The content-week
+   producer exists for other worlds; wiring it to `listing_campaign` is the next real feature.
+2. **Newsletter compose + send in one place.** Writing lives in the Newsletter area, sending lives
+   on Contacts. Mount the batch-send card in the Newsletter area so it is one room.
+3. **A fuller contact import** — full name from two columns, keep the phone, tolerate a CRM export's
+   extra columns. Her sphere is the newsletter's audience; this is what makes it clean.
+4. **A branded newsletter template.** She wrote "newsletter" three times; plain text will not hold.
+5. **Reels** — once the paid Ayrshare tier is on: the storyboard rail plus a video file in the same
+   photo field.
+6. **Receipt-linked expenses in the app**, so the spreadsheet retires into the same ledger as
+   results.
+7. **A mail vendor behind an approval with a hard cost ceiling** — closes farming steps 11–13 and
+   turns the postcard chain from a tool into a business. Last, because it is the one with a bill.
 
 ---
 
 *Claims trace to: `src/lib/garvis/workweb.ts` (the workspace areas) ·
 `supabase/functions/_shared/socialCore.ts` (the platform and media rules) ·
 `src/components/garvis/SocialPublisher.tsx` · `src/components/garvis/re/CampaignStudio.tsx` ·
-`src/components/garvis/BatchSendCard.tsx` (the newsletter send) ·
+`src/components/garvis/BatchSendCard.tsx` (the newsletter send) · `src/lib/garvis/re/reRun.ts` (the photo upload) ·
 `docs/real-estate-marketing-implementation.md` §§2, 5, 6, 8 ·
 `docs/capability-audit/03-real-estate-marketing.md` §1 (her sixteen-step chain) ·
 `docs/reviews/2026-07-31-real-estate-hands-on-review.md` §§2–4 · `docs/go-live-checklist.md`.*

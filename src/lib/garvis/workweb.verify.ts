@@ -5,7 +5,7 @@
 
 import {
   ARCHETYPES, FLAVORS, TOOL_IDS, makeCharter, parseCharter, toolsFor,
-  MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, WEB_TEMPLATES, templateById, templateForWeb,
+  MOM_REAL_ESTATE_TEMPLATE, REAL_ESTATE_CAMPAIGN_TEMPLATE, APP_LAUNCH_TEMPLATE, WEB_TEMPLATES, templateById, templateForWeb,
   flattenTemplate, validateTemplate, parseAudienceCsv, rollupWeb, deriveStatus, canvasNodeForArea,
   type Archetype, type Flavor,
 } from './workweb';
@@ -152,6 +152,23 @@ check('parseCharter handles null/undefined/strings', parseCharter(null) === null
     parseCharter({ archetype: 'studio', flavor: 'not-a-flavor' })?.flavor === 'generic');
   check('a listing_campaign charter survives parsing (it is a real studio)',
     parseCharter({ archetype: 'studio', flavor: 'listing_campaign' })?.flavor === 'listing_campaign');
+}
+
+// The real-estate workspace carries the operator's own list, not just the campaign rail. Each of
+// these is a line she wrote down; losing one silently is how "go use a different workspace" comes
+// back. The studio stays FIRST so the world still opens on the work.
+{
+  const flat = flattenTemplate(REAL_ESTATE_CAMPAIGN_TEMPLATE);
+  const has = (a: Archetype, f: Flavor) => flat.some((n) => n.charter.archetype === a && n.charter.flavor === f);
+  check('real-estate-campaign opens on the campaign studio (first area)',
+    flat[0]?.charter.flavor === 'listing_campaign', flat[0]?.slug);
+  check('real-estate-campaign can post to her six accounts (a social studio area)', has('studio', 'social'));
+  check('real-estate-campaign can write the monthly newsletter (an email studio area)', has('studio', 'email'));
+  const audience = flat.find((n) => n.charter.archetype === 'audience');
+  check('real-estate-campaign can import her past clients (an audience area with Upload list)',
+    !!audience && toolsFor(audience.charter).some((t) => t.id === 'upload-list'));
+  check('real-estate-campaign can design a postcard and screen a farm area (a direct_mail studio area)', has('studio', 'direct_mail'));
+  check('real-estate-campaign stays small — eight areas, not twenty', flat.length === 8, String(flat.length));
 }
 
 console.log(`\nworkweb.verify: ${passed} passed, ${failed} failed`);

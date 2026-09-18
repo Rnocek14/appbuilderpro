@@ -14,23 +14,41 @@
 // its review date is named — never quietly dropped and never quietly used.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BookOpenCheck, CheckCircle2, ExternalLink, Loader2, Plus, Send } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, ExternalLink, ImagePlus, Loader2, Plus, Send, X } from 'lucide-react';
 import { Badge, Button, EmptyState, Input, Skeleton } from '../../ui';
 import { DRAFT_KINDS, type DraftKind } from '../../../lib/garvis/reDraft';
 import { citationBlocker } from '../../../lib/garvis/reFacts';
 import { localToInstant, scheduleCaveat } from '../../../lib/garvis/reSchedule';
+import { MEDIA_REQUIRED, PLATFORM_LABEL, checkDraft, type Platform } from '../../../lib/garvis/social';
 import {
-  addFact, composeDraft, createCommunity, listCommunities, listFacts, loadPulse, queueDraft,
+  addFact, composeDraft, createCommunity, listCommunities, listFacts, loadPulse, queueDraft, uploadPostPhoto,
   type Community, type FactWithSources, type PulseState,
 } from '../../../lib/garvis/re/reRun';
 
 type Toast = (kind: 'success' | 'error' | 'info', message: string) => void;
 
 const TZ = 'America/Chicago';
-// Facebook only, for now, and deliberately: socialCore REFUSES a text-only post to Instagram
-// (MEDIA_REQUIRED), and attaching media is Phase 1b. Hardcoding Instagram here would produce a post
-// that is rejected at the queue — an honest refusal, but a pointless one to walk into every time.
-const PLATFORMS = ['facebook'];
+// The six accounts a working agent actually keeps, in the order she listed them. This used to be
+// Facebook alone, because attaching media was Phase 1b and socialCore refuses a text-only post to
+// Instagram — so the honest move was to hide the platforms that would be refused. Media is here now,
+// so the platforms are too; the refusal is still honest, it just shows up as a named blocker under
+// the draft instead of as a surprise at the Queue.
+const PLATFORMS: Platform[] = ['facebook', 'instagram', 'linkedin', 'gmb', 'youtube', 'tiktok'];
+// Facebook alone by default, because the default has to be QUEUEABLE before anything is attached
+// (zero-input value): a default that includes Instagram is a disabled button until a photo arrives.
+// Instagram is one tap away and says "needs a photo" until it has one.
+const DEFAULT_PLATFORMS: Platform[] = ['facebook'];
+// Remembering her last choice is a per-browser convenience, never state — a missing or unreadable
+// value falls back to the default and nothing is worse for it.
+const platformKey = (worldId: string | null) => `re-platforms:${worldId ?? 'no-world'}`;
+function rememberedPlatforms(worldId: string | null): Platform[] {
+  try {
+    const raw = localStorage.getItem(platformKey(worldId));
+    const arr = raw ? (JSON.parse(raw) as unknown) : null;
+    const ok = Array.isArray(arr) ? arr.filter((p): p is Platform => PLATFORMS.includes(p as Platform)) : [];
+    return ok.length ? ok : DEFAULT_PLATFORMS;
+  } catch { return DEFAULT_PLATFORMS; }
+}
 
 export function CampaignStudio({ worldId, onToast }: { worldId: string | null; onToast: Toast }) {
   const [pulse, setPulse] = useState<PulseState | null>(null);
@@ -47,6 +65,9 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
   const [linkUrl, setLinkUrl] = useState('');
   const [agentName, setAgentName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [platforms, setPlatforms] = useState<Platform[]>(() => rememberedPlatforms(worldId));
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -97,14 +118,14 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
     setBusy(true);
     try {
       const r = await queueDraft({
-        text, platforms: PLATFORMS, worldId, factIds,
+        text, platforms, mediaUrls: photoUrl ? [photoUrl] : [], worldId, factIds,
         complianceLine: complianceLine.trim() || null,
         scheduleLocal: scheduleLocal || null, scheduleTz: TZ,
         linkUrl: linkUrl.trim() || null,
       });
       for (const w of r.warnings) onToast('info', w);
       onToast('success', 'Sent to the Queue — it publishes only after you approve it there.');
-      setText(''); setFactIds([]); setBlockers([]);
+      setText(''); setFactIds([]); setBlockers([]); setPhotoUrl(null);
       await refresh();
     } catch (e) {
       onToast('error', e instanceof Error ? e.message : 'Could not queue this.');
@@ -114,7 +135,33 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
   };
 
   const hasHole = /\[VERIFY:/.test(text);
-  const canQueue = !!text.trim() && !hasHole && !busy;
+  // The same refusal the rail applies at queue time, shown under the draft so she never walks into
+  // it: "Instagram needs an image or video — attach one or drop the platform."
+  const gate = useMemo(
+    () => checkDraft({ text, platforms, mediaUrls: photoUrl ? [photoUrl] : [] }, now),
+    [text, platforms, photoUrl, now],
+  );
+  const canQueue = !!text.trim() && !hasHole && gate.ok && !busy && !uploading;
+
+  const togglePlatform = (p: Platform) => {
+    setPlatforms((prev) => {
+      const next = prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p];
+      try { localStorage.setItem(platformKey(worldId), JSON.stringify(next)); } catch { /* convenience only */ }
+      return next;
+    });
+  };
+
+  const onPhoto = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      setPhotoUrl(await uploadPostPhoto(file, worldId));
+    } catch (e) {
+      onToast('error', e instanceof Error ? e.message : 'Could not upload that photo.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="mt-6 rounded-2xl border border-forge-border bg-forge-raised/40 p-4">
@@ -202,6 +249,67 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
             </div>
           )}
 
+          {/* ---- the photo: one real picture, hers, digested into the approval ---- */}
+          <div className="flex flex-wrap items-center gap-3">
+            {photoUrl ? (
+              <div className="flex items-center gap-2">
+                <img src={photoUrl} alt="The photo attached to this post" className="h-14 w-14 rounded-lg border border-forge-border object-cover" />
+                <button
+                  type="button"
+                  onClick={() => setPhotoUrl(null)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:text-forge-ink"
+                  aria-label="Remove the photo"
+                >
+                  <X size={12} /> Remove photo
+                </button>
+              </div>
+            ) : (
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} className="text-forge-ember" />}
+                {uploading ? 'Uploading…' : 'Add a photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  aria-label="Add a photo"
+                  disabled={uploading}
+                  onChange={(e) => { void onPhoto(e.target.files?.[0] ?? null); e.target.value = ''; }}
+                />
+              </label>
+            )}
+            <span className="text-[11px] text-forge-dim">
+              {photoUrl
+                ? 'Approval binds to this exact picture — swap it and the post needs a new decision.'
+                : 'Instagram, TikTok and YouTube will not take a post without one.'}
+            </span>
+          </div>
+
+          {/* ---- where it goes: real buttons, pressed state, refusal named below ---- */}
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Where to post">
+            {PLATFORMS.map((p) => {
+              const on = platforms.includes(p);
+              const needsPhoto = MEDIA_REQUIRED.includes(p) && !photoUrl;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => togglePlatform(p)}
+                  title={needsPhoto ? `${PLATFORM_LABEL[p]} needs a photo` : undefined}
+                  className={[
+                    'rounded-full border px-2.5 py-1 text-[11px] transition',
+                    on ? 'border-forge-ember/50 bg-forge-ember/10 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
+                    on && needsPhoto ? 'border-forge-warn/60' : '',
+                  ].join(' ')}
+                >
+                  {PLATFORM_LABEL[p]}{on && needsPhoto ? ' · needs a photo' : ''}
+                </button>
+              );
+            })}
+          </div>
+          {!gate.ok && gate.reason && <p className="text-[11px] text-forge-warn">{gate.reason}</p>}
+          {gate.warnings.map((w) => <p key={w} className="text-[11px] text-forge-dim">⚠ {w}</p>)}
+
           <div className="flex flex-wrap items-center gap-2">
             <Input
               value={linkUrl}
@@ -235,7 +343,7 @@ export function CampaignStudio({ worldId, onToast }: { worldId: string | null; o
               Send to the Queue
             </Button>
             {hasHole && <span className="text-[11px] text-forge-warn">Every [VERIFY: …] has to be filled or removed first.</span>}
-            {!hasHole && text.trim() && <span className="text-[11px] text-forge-dim">Nothing posts until you approve it in the Queue.</span>}
+            {!hasHole && text.trim() && gate.ok && <span className="text-[11px] text-forge-dim">Nothing posts until you approve it in the Queue.</span>}
           </div>
         </div>
       )}

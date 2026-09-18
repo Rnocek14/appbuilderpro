@@ -124,6 +124,27 @@ export function composeDraft(input: {
   return { text: rendered.text, factIds: rendered.usedFactIds, blockers: [...d.needs, ...rendered.holes, ...skipped] };
 }
 
+/** A real photo from her phone becomes a public URL the post can carry. This is the ONLY way a
+ *  listing-campaign post gets media, and deliberately: the file is hers (owner-scoped path in the
+ *  public-read assets bucket, the same one the site builder uses), it is never AI-generated (no
+ *  provenance row is written, so the disclosure gate correctly stays quiet), and the bytes are
+ *  digested at queue time so the approval binds to THIS picture, not to a URL that could be
+ *  re-pointed. Instagram, TikTok and YouTube refuse a text-only post — this is what unlocks them. */
+export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+
+export async function uploadPostPhoto(file: File, worldId: string | null): Promise<string> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  if (!file.type.startsWith('image/')) throw new Error('That is not a photo. Pick a JPG, PNG or HEIC.');
+  if (file.size > MAX_PHOTO_BYTES) throw new Error('That photo is over 10 MB — most phones can export a smaller copy.');
+  const clean = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'photo';
+  const path = `${uid}/re/${worldId ?? 'no-world'}/${Date.now()}-${clean}`;
+  const up = await supabase.storage.from('project-assets').upload(path, file, { contentType: file.type });
+  if (up.error) throw new Error(`Could not upload the photo: ${up.error.message}`);
+  return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
+}
+
 /** Draft → immutable version → pending approval. The human decides in the Queue. */
 export async function queueDraft(input: {
   text: string; platforms: string[]; mediaUrls?: string[]; worldId: string | null;

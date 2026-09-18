@@ -6,13 +6,14 @@
 // length overflows warn but don't block. Nothing posts without your approval.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Share2, Loader2, Send, XCircle, Link2 } from 'lucide-react';
+import { Share2, Loader2, Send, XCircle, Link2, ImagePlus } from 'lucide-react';
 import { KNOWN_PLATFORMS, PLATFORM_LABEL, checkDraft, type Platform } from '../../lib/garvis/social';
 import {
   queueSocialPost, listSocialPosts, cancelSocialPost, listSocialMetrics, metricsLine, syncSocialNow,
   type SocialPostRow, type PostMetricRow,
 } from '../../lib/garvis/socialRun';
 import { useConnections } from '../../hooks/useConnections';
+import { uploadPostPhoto } from '../../lib/garvis/re/reRun';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 
@@ -34,6 +35,17 @@ export function SocialPublisher({ worldId, onToast }: { worldId: string; onToast
   // Results (app_0087): real synced numbers per post — absent rows render nothing, never zeros.
   const [metrics, setMetrics] = useState<Map<string, PostMetricRow[]>>(new Map());
   const [syncing, setSyncing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  // The URL field stays (a photo already hosted somewhere is fine) — this just removes the
+  // upload-somewhere-then-copy-the-link step for the common case: a picture on her phone.
+  const onPhoto = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    try { setMediaUrl(await uploadPostPhoto(file, worldId)); }
+    catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not upload that photo.'); }
+    finally { setUploading(false); }
+  };
 
   useEffect(() => {
     let live = true;
@@ -114,8 +126,14 @@ export function SocialPublisher({ worldId, onToast }: { worldId: string; onToast
           className="mt-2 w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-[11px] text-forge-ink hover:border-forge-ember/50">
+            {uploading ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} className="text-forge-ember" />}
+            {uploading ? 'Uploading…' : 'Choose a photo'}
+            <input type="file" accept="image/*" className="sr-only" aria-label="Choose a photo" disabled={uploading}
+              onChange={(e) => { void onPhoto(e.target.files?.[0] ?? null); e.target.value = ''; }} />
+          </label>
           <label className="flex items-center gap-1.5 text-[11px] text-forge-dim">
-            <Link2 size={12} /> Image URL
+            <Link2 size={12} /> or image URL
             <input value={mediaUrl} onChange={(e) => setMediaUrl(e.target.value)} placeholder="https://…/photo.jpg"
               className="w-52 rounded-lg border border-forge-border bg-forge-bg px-2 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
           </label>
